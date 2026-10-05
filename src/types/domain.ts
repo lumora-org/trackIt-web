@@ -355,9 +355,15 @@ export const DAILY_REPORT_STATUSES = [
 ] as const;
 export type DailyReportStatus = (typeof DAILY_REPORT_STATUSES)[number];
 
+/**
+ * doc 05 §57 shows DRAFT → SUBMITTED → UNDER_REVIEW → APPROVED/REJECTED, but
+ * doc 04 documents only submit/approve/reject/resubmit — no operation sets or
+ * clears UNDER_REVIEW. It is therefore deliberately absent as a transition
+ * target (ASSUMPTIONS.md §3.3). It remains a valid enum value for rendering.
+ */
 export const DAILY_REPORT_TRANSITIONS: Record<DailyReportStatus, DailyReportStatus[]> = {
   DRAFT: ['SUBMITTED'],
-  SUBMITTED: ['UNDER_REVIEW', 'APPROVED', 'REJECTED'],
+  SUBMITTED: ['APPROVED', 'REJECTED'],
   UNDER_REVIEW: ['APPROVED', 'REJECTED'],
   APPROVED: [],
   REJECTED: ['DRAFT'],
