@@ -1,0 +1,116 @@
+@import 'tailwindcss';
+
+/*
+ * Mobile-first design tokens (PROMPT.md §2, §4).
+ * Breakpoints follow the documented targets: 320 / 375 / 390 / 430 / 768 /
+ * 1024 / 1280 / 1440.
+ */
+@theme {
+  /* Brand — deep green reads as "fuel/energy" without the petrol-blue cliché. */
+  --color-brand-50: oklch(0.97 0.02 155);
+  --color-brand-100: oklch(0.93 0.05 155);
+  --color-brand-200: oklch(0.86 0.09 155);
+  --color-brand-300: oklch(0.76 0.13 155);
+  --color-brand-400: oklch(0.65 0.15 155);
+  --color-brand-500: oklch(0.55 0.15 155);
+  --color-brand-600: oklch(0.46 0.13 155);
+  --color-brand-700: oklch(0.38 0.1 155);
+  --color-brand-800: oklch(0.3 0.07 155);
+  --color-brand-900: oklch(0.23 0.05 155);
+  --color-brand-950: oklch(0.15 0.03 155);
+
+  /* Semantic status colours used by StatusBadge across every module. */
+  --color-success-50: oklch(0.96 0.04 150);
+  --color-success-500: oklch(0.6 0.15 150);
+  --color-success-700: oklch(0.42 0.12 150);
+
+  --color-warning-50: oklch(0.97 0.05 85);
+  --color-warning-500: oklch(0.76 0.15 75);
+  --color-warning-700: oklch(0.48 0.12 60);
+
+  --color-danger-50: oklch(0.96 0.03 25);
+  --color-danger-500: oklch(0.58 0.2 25);
+  --color-danger-700: oklch(0.42 0.16 25);
+
+  --color-info-50: oklch(0.96 0.03 240);
+  --color-info-500: oklch(0.58 0.14 240);
+  --color-info-700: oklch(0.42 0.12 240);
+
+  --color-neutral-50: oklch(0.98 0.002 250);
+  --color-neutral-100: oklch(0.96 0.003 250);
+  --color-neutral-200: oklch(0.91 0.004 250);
+  --color-neutral-300: oklch(0.85 0.005 250);
+  --color-neutral-400: oklch(0.7 0.006 250);
+  --color-neutral-500: oklch(0.58 0.007 250);
+  --color-neutral-600: oklch(0.47 0.008 250);
+  --color-neutral-700: oklch(0.37 0.009 250);
+  --color-neutral-800: oklch(0.27 0.01 250);
+  --color-neutral-900: oklch(0.2 0.01 250);
+  --color-neutral-950: oklch(0.14 0.01 250);
+
+  /*
+   * Touch targets: PROMPT.md §3 requires large targets for gloved/field use.
+   * 44px is the WCAG 2.5.5 minimum and comfortably above the 40px many field
+   * apps use.
+   */
+  --spacing-touch: 2.75rem;
+
+  --radius-card: 0.875rem;
+}
+
+@layer base {
+  html {
+    /* Respect users who ask for reduced motion. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-neutral-50 text-neutral-900 antialiased;
+    /* Prevent iOS zoom-on-focus by keeping inputs at >=16px (PROMPT.md §26). */
+    font-size: 16px;
+  }
+
+  /* Visible focus for keyboard users on every interactive element. */
+  :focus-visible {
+    @apply outline-brand-600 outline-2 outline-offset-2;
+  }
+
+  /* Inputs must never trigger iOS zoom. */
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
+@layer components {
+  /*
+   * Desktop tables become stacked cards on mobile (PROMPT.md §16). The card
+   * variant is driven by a `data-variant` attribute on the wrapper so the same
+   * column definitions serve both presentations.
+   */
+  .hide-below-md {
+    @apply hidden md:table-cell;
+  }
+}
+
+@layer utilities {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  /* Respect reduced-motion for the few transitions we do use. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
