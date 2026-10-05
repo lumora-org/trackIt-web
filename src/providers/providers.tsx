@@ -9,6 +9,7 @@ import { ApiError } from '@/api/errors';
 import { env } from '@/lib/env';
 
 import { MockApiProvider } from './mock-api-provider';
+import { AuthProvider } from './auth-provider';
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -44,7 +45,9 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <MockApiProvider>{children}</MockApiProvider>
+      <MockApiProvider>
+        <AuthProvider>{children}</AuthProvider>
+      </MockApiProvider>
       {env.isDev ? <ReactQueryDevtools initialIsOpen={false} /> : null}
     </QueryClientProvider>
   );

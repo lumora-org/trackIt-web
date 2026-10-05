@@ -5,6 +5,7 @@ import {
   configureApiClient,
   getAccessToken,
   resetApiClientForTests,
+  resolveUrl,
   setAccessToken,
   unwrapEnvelope,
   apiClient,
@@ -54,6 +55,42 @@ describe('unwrapEnvelope', () => {
 
   it('handles a 204 null body', () => {
     expect(unwrapEnvelope(null).data).toBeNull();
+  });
+});
+
+describe('resolveUrl', () => {
+  it('applies the mandatory /api/v1 prefix (doc 04 §2.1)', () => {
+    resetApiClientForTests();
+    configureApiClient({ baseUrl: 'http://api.test:4000' });
+    expect(resolveUrl('/auth/login')).toBe('http://api.test:4000/api/v1/auth/login');
+  });
+
+  it('does not double-prefix a path that already includes it', () => {
+    resetApiClientForTests();
+    configureApiClient({ baseUrl: 'http://api.test:4000' });
+    expect(resolveUrl('/api/v1/inventory')).toBe('http://api.test:4000/api/v1/inventory');
+  });
+
+  it('tolerates a trailing slash on the base URL', () => {
+    resetApiClientForTests();
+    configureApiClient({ baseUrl: 'http://api.test:4000/' });
+    expect(resolveUrl('/sales')).toBe('http://api.test:4000/api/v1/sales');
+  });
+
+  it('produces an absolute URL when the base is empty (mock mode)', () => {
+    resetApiClientForTests();
+    configureApiClient({ baseUrl: '' });
+    // Relative URLs are rejected by fetch outside a browser, so the current
+    // origin must be used rather than emitting a bare path.
+    expect(resolveUrl('/auth/login')).toBe(`${window.location.origin}/api/v1/auth/login`);
+  });
+
+  it('appends the query string', () => {
+    resetApiClientForTests();
+    configureApiClient({ baseUrl: 'http://api.test:4000' });
+    expect(resolveUrl('/sales', '?page=2&limit=50')).toBe(
+      'http://api.test:4000/api/v1/sales?page=2&limit=50',
+    );
   });
 });
 

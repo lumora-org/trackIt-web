@@ -71,6 +71,27 @@ export function getApiBaseUrl(): string {
   return config.baseUrl;
 }
 
+/**
+ * Resolve the final request URL.
+ *
+ * doc 04 §2.1 — the `/api/v1` prefix is applied by the client, so the configured
+ * base URL is an origin only (`http://localhost:4000`). Callers pass resource
+ * paths such as `/auth/login`.
+ *
+ * In mock mode `baseUrl` is empty and the MSW worker serves `/api/v1/*` from the
+ * page's own origin, so the request stays same-origin — but `fetch` rejects a
+ * relative URL outside a browser. Resolving against the current origin (or a
+ * localhost fallback under Node/test) keeps both environments working while
+ * still producing an absolute URL.
+ */
+export function resolveUrl(path: string, query = ''): string {
+  const base = config.baseUrl.replace(/\/$/, '');
+  const suffix = path.startsWith(API_PREFIX) ? path : `${API_PREFIX}${path}`;
+  const origin =
+    base || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+  return new URL(`${base}${suffix}`, origin).toString() + query;
+}
+
 /* ------------------------------------------------------------ url helpers */
 
 export type QueryValue = string | number | boolean | null | undefined | Array<string | number>;
@@ -177,7 +198,7 @@ async function rawRequest(
   options: RequestOptions = {},
 ): Promise<unknown> {
   const doFetch = config.fetchImpl ?? fetch;
-  const url = `${config.baseUrl}${path}${buildQuery(options.query)}`;
+  const url = resolveUrl(path, buildQuery(options.query));
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
