@@ -52,7 +52,7 @@ describe('branch scoping (doc 04 §21.1)', () => {
 });
 
 describe('manager cannot reach another branch', () => {
-  it('rejects reading another branch\'s inventory', async () => {
+  it("rejects reading another branch's inventory", async () => {
     const user = await asManager();
     const otherBranch = 'c0000000-0000-4000-8000-000000000002';
 
@@ -81,9 +81,9 @@ describe('manager cannot reach another branch', () => {
 
   it('rejects a manager creating a fuel type (doc 08 §11)', async () => {
     await asManager();
-    await expect(
-      apiClient.post('/fuel-types', { name: 'X', code: 'XYZ' }),
-    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(apiClient.post('/fuel-types', { name: 'X', code: 'XYZ' })).rejects.toMatchObject({
+      statusCode: 403,
+    });
   });
 
   it('rejects a manager approving a daily report (doc 06 §28)', async () => {
