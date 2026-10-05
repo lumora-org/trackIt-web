@@ -7,7 +7,8 @@
 
 import type { UserRole } from '@/types/domain';
 
-type ListFilters = Record<string, unknown>;
+/** A filter object may be passed to a query key as long as it is indexable. */
+type QueryFilters = { [key: string]: unknown };
 
 export const queryKeys = {
   auth: {
@@ -15,88 +16,88 @@ export const queryKeys = {
   },
 
   dashboard: {
-    admin: (filters?: ListFilters) => ['dashboard', 'admin', filters ?? {}] as const,
+    admin: (filters?: QueryFilters) => ['dashboard', 'admin', filters ?? {}] as const,
     manager: ['dashboard', 'manager'] as const,
     inventory: ['dashboard', 'inventory'] as const,
   },
 
   businesses: {
-    list: (filters?: ListFilters) => ['businesses', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['businesses', 'list', filters ?? {}] as const,
     detail: (id: string) => ['businesses', 'detail', id] as const,
   },
 
   branches: {
-    list: (filters?: ListFilters) => ['branches', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['branches', 'list', filters ?? {}] as const,
     detail: (id: string) => ['branches', 'detail', id] as const,
   },
 
   users: {
-    list: (filters?: ListFilters) => ['users', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['users', 'list', filters ?? {}] as const,
     detail: (id: string) => ['users', 'detail', id] as const,
   },
 
   fuelTypes: {
-    list: (filters?: ListFilters) => ['fuel-types', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['fuel-types', 'list', filters ?? {}] as const,
     detail: (id: string) => ['fuel-types', 'detail', id] as const,
   },
 
   fuelPrices: {
-    list: (filters?: ListFilters) => ['fuel-prices', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['fuel-prices', 'list', filters ?? {}] as const,
     current: (fuelTypeId: string) => ['fuel-prices', 'current', fuelTypeId] as const,
     /** doc 04 §29.1 — history is derived from the list endpoint via date filters. */
     history: (fuelTypeId: string) => ['fuel-prices', 'history', fuelTypeId] as const,
   },
 
   suppliers: {
-    list: (filters?: ListFilters) => ['suppliers', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['suppliers', 'list', filters ?? {}] as const,
     detail: (id: string) => ['suppliers', 'detail', id] as const,
   },
 
   tankers: {
-    list: (filters?: ListFilters) => ['tankers', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['tankers', 'list', filters ?? {}] as const,
     detail: (id: string) => ['tankers', 'detail', id] as const,
   },
 
   fuelOrders: {
-    list: (filters?: ListFilters) => ['fuel-orders', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['fuel-orders', 'list', filters ?? {}] as const,
     detail: (id: string) => ['fuel-orders', 'detail', id] as const,
   },
 
   deliveries: {
-    list: (filters?: ListFilters) => ['deliveries', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['deliveries', 'list', filters ?? {}] as const,
     detail: (id: string) => ['deliveries', 'detail', id] as const,
   },
 
   inventory: {
-    stock: (filters?: ListFilters) => ['inventory', 'stock', filters ?? {}] as const,
+    stock: (filters?: QueryFilters) => ['inventory', 'stock', filters ?? {}] as const,
     summary: (branchId?: string) => ['inventory', 'summary', branchId ?? null] as const,
-    transactions: (filters?: ListFilters) => ['inventory', 'transactions', filters ?? {}] as const,
+    transactions: (filters?: QueryFilters) => ['inventory', 'transactions', filters ?? {}] as const,
   },
 
   sales: {
-    list: (filters?: ListFilters) => ['sales', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['sales', 'list', filters ?? {}] as const,
     detail: (id: string) => ['sales', 'detail', id] as const,
   },
 
   dailyReports: {
-    list: (filters?: ListFilters) => ['daily-reports', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['daily-reports', 'list', filters ?? {}] as const,
     detail: (id: string) => ['daily-reports', 'detail', id] as const,
   },
 
   notifications: {
-    list: (filters?: ListFilters) => ['notifications', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['notifications', 'list', filters ?? {}] as const,
     unreadCount: ['notifications', 'unread-count'] as const,
   },
 
   auditLogs: {
-    list: (filters?: ListFilters) => ['audit-logs', 'list', filters ?? {}] as const,
+    list: (filters?: QueryFilters) => ['audit-logs', 'list', filters ?? {}] as const,
   },
 
   reports: {
-    sales: (filters?: ListFilters) => ['reports', 'sales', filters ?? {}] as const,
-    inventory: (filters?: ListFilters) => ['reports', 'inventory', filters ?? {}] as const,
-    deliveries: (filters?: ListFilters) => ['reports', 'deliveries', filters ?? {}] as const,
-    dailyReports: (filters?: ListFilters) => ['reports', 'daily-reports', filters ?? {}] as const,
+    sales: (filters?: QueryFilters) => ['reports', 'sales', filters ?? {}] as const,
+    inventory: (filters?: QueryFilters) => ['reports', 'inventory', filters ?? {}] as const,
+    deliveries: (filters?: QueryFilters) => ['reports', 'deliveries', filters ?? {}] as const,
+    dailyReports: (filters?: QueryFilters) => ['reports', 'daily-reports', filters ?? {}] as const,
   },
 } as const;
 
