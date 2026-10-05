@@ -2,12 +2,13 @@
 import { apiClient } from './client';
 import type { AppNotification } from '@/types/domain';
 
-export interface NotificationFilters {
+/** A type alias so it satisfies the query-key index signature. */
+export type NotificationFilters = {
   page?: number;
   limit?: number;
   status?: 'UNREAD' | 'READ';
   type?: string;
-}
+};
 
 export async function listNotifications(filters: NotificationFilters = {}) {
   return apiClient.list<AppNotification>('/notifications', {
