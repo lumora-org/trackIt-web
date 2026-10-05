@@ -192,6 +192,7 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   loading = false,
   variant = 'danger',
+  children,
 }: {
   open: boolean;
   onClose: () => void;
@@ -202,6 +203,8 @@ export function ConfirmDialog({
   cancelLabel?: string;
   loading?: boolean;
   variant?: 'danger' | 'primary';
+  /** Optional form content, e.g. the mandatory reason for a void. */
+  children?: ReactNode;
 }) {
   return (
     <Dialog
@@ -220,7 +223,10 @@ export function ConfirmDialog({
         </>
       }
     >
-      <p className="text-sm text-neutral-700">{description}</p>
+      <div className="space-y-4">
+        <p className="text-sm text-neutral-700">{description}</p>
+        {children}
+      </div>
     </Dialog>
   );
 }
