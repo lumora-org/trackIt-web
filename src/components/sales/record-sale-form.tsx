@@ -208,7 +208,7 @@ function RecordSaleForm({
                 className={`min-h-touch focus-visible:outline-brand-600 rounded-xl font-mono text-base font-bold transition-colors focus-visible:outline-2 ${
                   selected
                     ? 'bg-brand-600 text-white'
-                    : 'bg-white text-neutral-800 ring-1 ring-neutral-300 hover:bg-neutral-50'
+                    : 'bg-surface text-neutral-800 ring-1 ring-neutral-300 hover:bg-neutral-50'
                 }`}
               >
                 {fuel.code}

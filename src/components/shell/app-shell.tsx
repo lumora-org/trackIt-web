@@ -88,6 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           businessName={businessQuery.data?.name ?? 'K.B.Y GLOBAL INVESTMENT'}
           branchName={activeBranch?.name ?? null}
           userLabel={user ? fullName(user) : null}
+          avatarUrl={user?.avatarUrl ?? null}
           roleLabel={user ? ROLE_LABELS[user.role] : null}
           onOpenDrawer={() => setDrawerOpen(true)}
           unreadCount={unreadQuery.data}
@@ -97,7 +98,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           The business/branch context bar is desktop-only; on mobile it lives in
           the TopBar so it stays visible without consuming vertical space.
         */}
-        <div className="hidden items-center gap-3 border-b border-neutral-200 bg-white px-6 py-2 lg:flex">
+        <div className="hidden items-center gap-3 border-b border-neutral-200 bg-surface px-6 py-2 lg:flex">
           <span className="flex items-center gap-1.5 text-sm text-neutral-600">
             <Building2 className="size-4 text-neutral-400" aria-hidden="true" />
             {businessQuery.data?.name ?? '—'}
@@ -135,7 +136,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* ------------------------------------------- mobile bottom bar */}
       <nav
         aria-label="Primary"
-        className="safe-bottom fixed inset-x-0 bottom-0 z-30 flex items-stretch gap-0.5 border-t border-neutral-200 bg-white/95 px-1 pt-1 backdrop-blur lg:hidden"
+        className="safe-bottom fixed inset-x-0 bottom-0 z-30 flex items-stretch gap-0.5 border-t border-neutral-200 bg-surface/95 px-1 pt-1 backdrop-blur lg:hidden"
       >
         {bottomBar.map((item) => (
           <NavLink key={item.href} item={item} variant="bottom" />
@@ -273,7 +274,7 @@ function BranchSwitcher({
         id="branch-switcher"
         value={activeBranchId ?? ''}
         onChange={(e) => onChange(e.target.value || null)}
-        className="focus:border-brand-500 focus:ring-brand-500 min-h-9 appearance-none rounded-lg border border-neutral-300 bg-white py-1 pr-8 pl-2.5 text-sm font-medium text-neutral-800 focus:ring-2 focus:outline-none"
+        className="focus:border-brand-500 focus:ring-brand-500 min-h-9 appearance-none rounded-lg border border-neutral-300 bg-surface py-1 pr-8 pl-2.5 text-sm font-medium text-neutral-800 focus:ring-2 focus:outline-none"
       >
         <option value="">All branches</option>
         {branches.map((b) => (

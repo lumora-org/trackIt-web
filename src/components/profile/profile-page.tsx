@@ -1,13 +1,19 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation } from '@tanstack/react-query';
-import { CheckCircle2, KeyRound } from 'lucide-react';
-import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Camera, CheckCircle2, KeyRound } from 'lucide-react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { changePassword, changePasswordSchema, type ChangePasswordValues } from '@/api/auth.api';
 import { isApiError } from '@/api/errors';
+import {
+  AVATAR_MAX_BYTES,
+  AVATAR_SUPPORTED_TYPES,
+  updateMyAvatar,
+} from '@/api/users.api';
+import { Avatar } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { DetailRow } from '@/components/ui/stat-card';
 import { InlineError } from '@/components/ui/states';
 import { fullName } from '@/lib/format';
+import { queryKeys } from '@/lib/query-keys';
 import { ROLE_LABELS } from '@/lib/permissions';
 import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
@@ -41,8 +48,10 @@ export function ProfilePage() {
     <div className="space-y-5">
       <header>
         <h1 className="text-xl font-bold text-neutral-900">Profile</h1>
-        <p className="text-sm text-neutral-500">Your account details and password.</p>
+        <p className="text-sm text-neutral-500">Your account details, photo and password.</p>
       </header>
+
+      <AvatarCard />
 
       <Card>
         <CardHeader>
@@ -75,6 +84,109 @@ export function ProfilePage() {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * PROMPT.md §56 — profile photo. The file never leaves the browser as bytes:
+ * it is read into a data URL and posted to `/users/me/avatar`, which keeps the
+ * upload working identically against the mock and a future real backend.
+ */
+function AvatarCard() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: updateMyAvatar,
+    onSuccess: (updated) => {
+      setFormError(null);
+      // The identity query also feeds the top bar avatar.
+      queryClient.setQueryData(queryKeys.auth.me, updated);
+    },
+    onError: (err) => {
+      setFormError(isApiError(err) ? err.message : 'Unable to update your photo.');
+    },
+  });
+
+  if (!user) return null;
+
+  function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    // Reset so picking the same file again still fires a change event.
+    event.target.value = '';
+    if (!file) return;
+
+    if (!AVATAR_SUPPORTED_TYPES.includes(file.type as (typeof AVATAR_SUPPORTED_TYPES)[number])) {
+      setFormError('Choose a PNG, JPG or WebP image.');
+      return;
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      setFormError('Photos must be 2 MB or smaller.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') mutation.mutate(reader.result);
+      else setFormError('That file could not be read. Try another photo.');
+    };
+    reader.onerror = () => setFormError('That file could not be read. Try another photo.');
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Camera className="size-4 text-neutral-400" aria-hidden="true" />
+          Profile photo
+        </CardTitle>
+      </CardHeader>
+      <CardBody>
+        <div className="space-y-4">
+          {formError ? <InlineError message={formError} /> : null}
+          <div className="flex items-center gap-4">
+            <Avatar name={fullName(user)} src={user.avatarUrl} size="lg" />
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  loading={mutation.isPending}
+                  loadingText="Uploading"
+                  onClick={() => inputRef.current?.click()}
+                >
+                  {user.avatarUrl ? 'Replace photo' : 'Upload photo'}
+                </Button>
+                {user.avatarUrl ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="text-danger-700 hover:bg-danger-50"
+                    disabled={mutation.isPending}
+                    onClick={() => mutation.mutate(null)}
+                  >
+                    Remove
+                  </Button>
+                ) : null}
+              </div>
+              <p className="text-xs text-neutral-500">PNG, JPG or WebP, up to 2 MB.</p>
+            </div>
+          </div>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={handleFile}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+      </CardBody>
+    </Card>
   );
 }
 

@@ -127,7 +127,9 @@ export function Dialog({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="absolute inset-0 bg-neutral-950/50" aria-hidden="true" />
+      {/* A scrim must stay dark in both themes, so it uses raw black rather
+          than the neutral ramp, which the dark theme inverts. */}
+      <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
 
       <div
         ref={containerRef}
@@ -136,7 +138,7 @@ export function Dialog({
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         className={cn(
-          'relative flex max-h-dvh w-full flex-col bg-white shadow-xl',
+          'relative flex max-h-dvh w-full flex-col bg-surface shadow-xl',
           'rounded-t-2xl sm:rounded-2xl',
           side === 'right' && 'max-w-sm rounded-t-none sm:rounded-l-2xl sm:rounded-tr-none',
           side === 'bottom' && 'max-h-[90dvh] rounded-t-2xl',

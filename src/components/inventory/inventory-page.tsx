@@ -214,7 +214,7 @@ export function InventoryPage() {
               {stock.map((row) => (
                 <div
                   key={`${row.branchId}-${row.fuelTypeId}`}
-                  className="rounded-card border border-neutral-200 bg-white p-4 shadow-xs"
+                  className="rounded-card border border-neutral-200 bg-surface p-4 shadow-xs"
                 >
                   <p className="font-mono text-sm font-semibold text-neutral-500">
                     {row.fuelTypeName}

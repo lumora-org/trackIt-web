@@ -104,7 +104,7 @@ export function DataTable<T>({
   return (
     <div className={cn('space-y-4', className)}>
       {/* ------------------------------------------------ desktop: table */}
-      <div className="rounded-card hidden overflow-x-auto border border-neutral-200 bg-white md:block">
+      <div className="rounded-card hidden overflow-x-auto border border-neutral-200 bg-surface md:block">
         <table className="w-full border-collapse text-sm">
           <caption className="sr-only">{caption}</caption>
           <thead>
@@ -160,7 +160,7 @@ export function DataTable<T>({
             <li key={rowKey(row)}>
               <div
                 className={cn(
-                  'rounded-card border border-neutral-200 bg-white p-4 shadow-xs',
+                  'rounded-card border border-neutral-200 bg-surface p-4 shadow-xs',
                   interactive && 'active:bg-neutral-50',
                 )}
               >

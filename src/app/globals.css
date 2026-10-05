@@ -6,6 +6,9 @@
  * 1024 / 1280 / 1440.
  */
 @theme {
+  /* Chrome surfaces (cards, bars, inputs). Flipped under `.dark` below. */
+  --color-surface: #ffffff;
+
   /* Brand — deep green reads as "fuel/energy" without the petrol-blue cliché. */
   --color-brand-50: oklch(0.97 0.02 155);
   --color-brand-100: oklch(0.93 0.05 155);
@@ -70,6 +73,54 @@
     font-size: 16px;
   }
 
+  /*
+   * Dark theme. Utilities compile to `var(--color-*)` references, so
+   * overriding the ramps here re-themes every component at once — no `dark:`
+   * variants sprinkled through the JSX. `text-white` stays untouched: it sits
+   * on brand/danger fills that keep their lightness in both themes.
+   */
+  .dark {
+    color-scheme: dark;
+
+    --color-surface: oklch(0.21 0.012 250);
+
+    /* Inverted neutral ramp: 900 becomes near-white text, 50 the ground. */
+    --color-neutral-50: oklch(0.165 0.012 250);
+    --color-neutral-100: oklch(0.205 0.012 250);
+    --color-neutral-200: oklch(0.27 0.014 250);
+    --color-neutral-300: oklch(0.35 0.015 250);
+    --color-neutral-400: oklch(0.56 0.01 250);
+    --color-neutral-500: oklch(0.65 0.008 250);
+    --color-neutral-600: oklch(0.74 0.007 250);
+    --color-neutral-700: oklch(0.84 0.006 250);
+    --color-neutral-800: oklch(0.91 0.004 250);
+    --color-neutral-900: oklch(0.965 0.003 250);
+    --color-neutral-950: oklch(0.985 0.002 250);
+
+    /* Chips pair `-50` grounds with `-700` text; keep both legible. */
+    --color-brand-50: oklch(0.28 0.045 155);
+    --color-brand-100: oklch(0.33 0.06 155);
+    --color-brand-700: oklch(0.72 0.12 155);
+    --color-brand-800: oklch(0.8 0.1 155);
+    --color-brand-900: oklch(0.87 0.08 155);
+
+    --color-success-50: oklch(0.29 0.055 150);
+    --color-success-500: oklch(0.7 0.15 150);
+    --color-success-700: oklch(0.85 0.11 150);
+
+    --color-warning-50: oklch(0.3 0.05 80);
+    --color-warning-500: oklch(0.81 0.14 75);
+    --color-warning-700: oklch(0.87 0.1 75);
+
+    --color-danger-50: oklch(0.28 0.06 25);
+    --color-danger-500: oklch(0.66 0.19 25);
+    --color-danger-700: oklch(0.84 0.11 25);
+
+    --color-info-50: oklch(0.29 0.05 240);
+    --color-info-500: oklch(0.68 0.13 240);
+    --color-info-700: oklch(0.83 0.1 240);
+  }
+
   /* Visible focus for keyboard users on every interactive element. */
   :focus-visible {
     @apply outline-brand-600 outline-2 outline-offset-2;
@@ -80,6 +131,39 @@
   select,
   textarea {
     font-size: max(16px, 1em);
+  }
+
+  /*
+   * Clickability must always be visible (PROMPT.md §3). Tailwind v4 preflight
+   * leaves <button> on the default arrow cursor, so restore the pointer for
+   * every interactive control. Disabled controls keep the arrow — they are
+   * not clickable — and text inputs keep the I-beam.
+   */
+  button:not(:disabled),
+  [role='button']:not(:disabled),
+  a,
+  select:not(:disabled),
+  label:has(input[type='checkbox']),
+  label:has(input[type='radio']),
+  input[type='checkbox'],
+  input[type='radio'],
+  summary {
+    cursor: pointer;
+  }
+
+  /*
+   * Native <select> popups are painted by the OS from the option's own
+   * colors, not from the control's — unstyled options end up with the
+   * inherited text colour on a light popup background, which in dark mode
+   * renders light-on-light: invisible until the hover highlight kicks in
+   * (reported on the Add User role/branch dropdowns). Both variables flip
+   * under `.dark`, so the popup now tracks the theme like every other
+   * surface.
+   */
+  select option,
+  select optgroup {
+    background-color: var(--color-surface);
+    color: var(--color-neutral-800);
   }
 }
 

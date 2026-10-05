@@ -132,7 +132,7 @@ export function LoginForm() {
 
       {/* Demo credentials, shown only while the mock API is driving the app. */}
       {process.env.NEXT_PUBLIC_USE_MOCK_API !== 'false' ? (
-        <div className="rounded-card mt-6 border border-dashed border-neutral-300 bg-white/60 p-4">
+        <div className="rounded-card mt-6 border border-dashed border-neutral-300 bg-surface/60 p-4">
           <p className="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
             Demo accounts
           </p>

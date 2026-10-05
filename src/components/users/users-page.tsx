@@ -3,17 +3,21 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { UserPlus, Users } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 import { isApiError } from '@/api/errors';
 import {
   createUser,
   createUserSchema,
+  deleteUser,
   listUsers,
   ROLE_FILTER_OPTIONS,
   setUserStatus,
+  updateUser,
+  updateUserSchema,
   type CreateUserInput,
+  type UpdateUserInput,
   type UserFilters,
 } from '@/api/users.api';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +30,8 @@ import { SearchInput, FilterSelect } from '@/components/shared/search-input';
 import { InlineError } from '@/components/ui/states';
 import { ROLE_LABELS } from '@/lib/permissions';
 import { queryKeys } from '@/lib/query-keys';
-import type { User, UserRole } from '@/types/domain';
+import type { AccountStatus, User, UserRole } from '@/types/domain';
+import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
 
 /**
@@ -35,16 +40,20 @@ import { useBranchContext } from '@/providers/branch-provider';
  * doc 07 §57 — an ADMIN manages MANAGERs, never other admins. The create form
  * therefore only offers ADMIN or MANAGER, and a MANAGER requires a branch while
  * an ADMIN must not have one (doc 03 §22). Both rules are enforced in the schema
- * so the impossible combinations are unselectable.
+ * so the impossible combinations are unselectable. Row actions follow the same
+ * rule: edit, suspend and delete are offered for managers only.
  */
 export function UsersPage() {
   const { branches } = useBranchContext();
+  const { user: caller } = useAuth();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [statusTarget, setStatusTarget] = useState<User | null>(null);
+  const [editTarget, setEditTarget] = useState<User | null>(null);
+  const [suspendTarget, setSuspendTarget] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
   const filters: UserFilters = {
     page,
@@ -59,11 +68,19 @@ export function UsersPage() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: 'ACTIVE' | 'INACTIVE' }) =>
+    mutationFn: ({ id, status }: { id: string; status: AccountStatus }) =>
       setUserStatus(id, status),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.users.list() });
-      setStatusTarget(null);
+      setSuspendTarget(null);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteUser(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.users.list() });
+      setDeleteTarget(null);
     },
   });
   const branchName = (id: string | null) => branches.find((b) => b.id === id)?.name ?? '—';
@@ -107,20 +124,41 @@ export function UsersPage() {
       header: '',
       align: 'right',
       mobileHidden: true,
-      render: (u) =>
-        u.status === 'ACTIVE' ? (
-          <Button variant="ghost" size="sm" onClick={() => setStatusTarget(u)}>
-            Deactivate
-          </Button>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => statusMutation.mutate({ id: u.id, status: 'ACTIVE' })}
-          >
-            Activate
-          </Button>
-        ),
+      render: (u) => {
+        // Nobody acts on their own row, and the platform owner is out of scope.
+        if (!caller || caller.id === u.id || u.role === 'SUPER_ADMIN') return null;
+        // doc 07 §57 — an admin manages managers, not other admins.
+        if (caller.role === 'ADMIN' && u.role !== 'MANAGER') return null;
+
+        return (
+          <div className="flex justify-end gap-1">
+            <Button variant="ghost" size="sm" onClick={() => setEditTarget(u)}>
+              Edit
+            </Button>
+            {u.status === 'ACTIVE' ? (
+              <Button variant="ghost" size="sm" onClick={() => setSuspendTarget(u)}>
+                Suspend
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => statusMutation.mutate({ id: u.id, status: 'ACTIVE' })}
+              >
+                Activate
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-danger-700 hover:bg-danger-50"
+              onClick={() => setDeleteTarget(u)}
+            >
+              Delete
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 
@@ -130,7 +168,8 @@ export function UsersPage() {
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Users</h1>
           <p className="text-sm text-neutral-500">
-            Administrators and branch managers. Users are deactivated, never deleted.
+            Administrators and branch managers. Suspend to block sign-in, delete to remove a
+            manager permanently.
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
@@ -184,21 +223,55 @@ export function UsersPage() {
         branches={branches.map((b) => ({ value: b.id, label: `${b.name} (${b.code})` }))}
       />
 
+      <EditUserDialog
+        target={editTarget}
+        onClose={() => setEditTarget(null)}
+        branches={branches.map((b) => ({ value: b.id, label: `${b.name} (${b.code})` }))}
+      />
+
       <ConfirmDialog
-        open={Boolean(statusTarget)}
-        onClose={() => setStatusTarget(null)}
+        open={Boolean(suspendTarget)}
+        onClose={() => {
+          setSuspendTarget(null);
+          statusMutation.reset();
+        }}
         onConfirm={() =>
-          statusTarget && statusMutation.mutate({ id: statusTarget.id, status: 'INACTIVE' })
+          suspendTarget && statusMutation.mutate({ id: suspendTarget.id, status: 'SUSPENDED' })
         }
-        title="Deactivate this user?"
+        title="Suspend this user?"
         description={
-          statusTarget
-            ? `${statusTarget.firstName} ${statusTarget.lastName} will no longer be able to sign in. Their history is kept.`
+          suspendTarget
+            ? `${suspendTarget.firstName} ${suspendTarget.lastName} will not be able to sign in until they are reactivated. Their records are kept.`
             : ''
         }
-        confirmLabel="Deactivate"
+        confirmLabel="Suspend"
         loading={statusMutation.isPending}
-      />
+      >
+        {statusMutation.error?.message ? (
+          <InlineError message={statusMutation.error.message} />
+        ) : null}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => {
+          setDeleteTarget(null);
+          deleteMutation.reset();
+        }}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        title="Delete this user?"
+        description={
+          deleteTarget
+            ? `${deleteTarget.firstName} ${deleteTarget.lastName} will be permanently removed. Suspend instead if you may need them back.`
+            : ''
+        }
+        confirmLabel="Delete"
+        loading={deleteMutation.isPending}
+      >
+        {deleteMutation.error?.message ? (
+          <InlineError message={deleteMutation.error.message} />
+        ) : null}
+      </ConfirmDialog>
     </div>
   );
 }
@@ -358,6 +431,149 @@ function CreateUserDialog({
           disabled={mutation.isPending}
           {...register('confirmPassword')}
         />
+      </div>
+    </Dialog>
+  );
+}
+
+/* ---------------------------------------------------------------- edit */
+
+/**
+ * doc 04 §18 — profile fields only. Email and role are immutable here, and a
+ * manager must keep a branch (doc 03 §22).
+ */
+function EditUserDialog({
+  target,
+  onClose,
+  branches,
+}: {
+  target: User | null;
+  onClose: () => void;
+  branches: ReadonlyArray<{ value: string; label: string }>;
+}) {
+  const queryClient = useQueryClient();
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    formState: { errors },
+  } = useForm<UpdateUserInput>({
+    resolver: zodResolver(updateUserSchema),
+    defaultValues: { firstName: '', lastName: '', phone: '' },
+  });
+
+  // Re-seed the form whenever a different row is opened.
+  useEffect(() => {
+    if (!target) return;
+    reset({
+      firstName: target.firstName,
+      lastName: target.lastName,
+      phone: target.phone ?? '',
+      branchId: target.branchId ?? '',
+    });
+  }, [target, reset]);
+
+  const mutation = useMutation({
+    mutationFn: (input: UpdateUserInput) => updateUser(target!.id, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.users.list() });
+      onClose();
+    },
+    onError: (err) => {
+      if (isApiError(err)) {
+        const branchError = err.fieldError('branchId');
+        if (branchError) setError('branchId', { message: branchError });
+        setFormError(branchError ? null : err.message);
+      } else {
+        setFormError('Something went wrong. Please try again.');
+      }
+    },
+  });
+
+  const submit = handleSubmit((values) => {
+    if (!target) return;
+    // A manager must remain pinned to a branch (doc 03 §22).
+    if (target.role === 'MANAGER' && !values.branchId) {
+      setError('branchId', { message: 'Select a branch for the manager' });
+      return;
+    }
+    setFormError(null);
+    mutation.mutate(values);
+  });
+
+  return (
+    <Dialog
+      open={Boolean(target)}
+      onClose={() => {
+        setFormError(null);
+        onClose();
+      }}
+      title="Edit user"
+      description={target ? `${target.email} · ${ROLE_LABELS[target.role]}` : undefined}
+      size="lg"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={submit} loading={mutation.isPending} loadingText="Saving">
+            Save changes
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {formError ? <InlineError message={formError} /> : null}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            label="First name"
+            error={errors.firstName?.message}
+            disabled={mutation.isPending}
+            {...register('firstName')}
+          />
+          <Input
+            label="Last name"
+            error={errors.lastName?.message}
+            disabled={mutation.isPending}
+            {...register('lastName')}
+          />
+        </div>
+
+        <Input
+          label="Email"
+          description="Email addresses cannot be changed."
+          value={target?.email ?? ''}
+          readOnly
+        />
+
+        <Input
+          label="Phone"
+          type="tel"
+          inputMode="tel"
+          error={errors.phone?.message}
+          disabled={mutation.isPending}
+          {...register('phone')}
+        />
+
+        {target?.role === 'MANAGER' ? (
+          <Select
+            label="Branch"
+            placeholder="Select a branch"
+            options={branches}
+            error={errors.branchId?.message}
+            disabled={mutation.isPending}
+            {...register('branchId')}
+          />
+        ) : null}
+
+        <p className="rounded-xl bg-neutral-100 px-3 py-2.5 text-xs text-neutral-600">
+          Roles cannot be changed after creation. Suspend this user and create a new one if their
+          responsibilities change.
+        </p>
       </div>
     </Dialog>
   );

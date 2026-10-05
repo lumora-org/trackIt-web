@@ -93,6 +93,7 @@ function toAuthenticatedUser(user: User): AuthenticatedUser {
     lastName: user.lastName,
     email: user.email,
     phone: user.phone,
+    avatarUrl: user.avatarUrl,
     role: user.role,
     status: user.status,
     businessId: user.businessId,
@@ -110,6 +111,34 @@ function requireAuth(request: Request) {
 function requireRole(user: AuthenticatedUser | null, roles: AuthenticatedUser['role'][]) {
   if (!user) return false;
   return roles.includes(user.role);
+}
+
+/*
+ * Profile photos (PROMPT.md §56). The mock store resets on every page load
+ * while the refresh cookie keeps the session alive, so an uploaded photo would
+ * otherwise vanish between reloads. Avatars are mirrored into localStorage
+ * (browser only) and re-applied to the seed users when this module boots.
+ */
+const AVATAR_STORAGE_PREFIX = 'trackit-avatar:';
+/** A ~2 MB file is ~2.7 MB of base64 text; the cap leaves headroom. */
+const AVATAR_MAX_CHARS = 3_500_000;
+const AVATAR_DATA_URL = /^data:image\/(png|jpe?g|webp);base64,/;
+
+function persistAvatar(userId: string, avatarUrl: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (avatarUrl) window.localStorage.setItem(`${AVATAR_STORAGE_PREFIX}${userId}`, avatarUrl);
+    else window.localStorage.removeItem(`${AVATAR_STORAGE_PREFIX}${userId}`);
+  } catch {
+    // Storage may be unavailable or full; the in-memory copy still applies.
+  }
+}
+
+if (typeof window !== 'undefined') {
+  for (const seeded of USERS) {
+    const stored = window.localStorage.getItem(`${AVATAR_STORAGE_PREFIX}${seeded.id}`);
+    if (stored) seeded.avatarUrl = stored;
+  }
 }
 
 /** doc 04 §89 */
@@ -262,6 +291,17 @@ export const handlers = [
     if (user.role !== 'SUPER_ADMIN') return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
     const { slice, meta } = paginate([BUSINESS], new URL(request.url));
     return ok(slice, meta);
+  }),
+
+  // The AppShell reads the business name for the header. ADMIN/MANAGER may read
+  // their own business even though the collection is SUPER_ADMIN-only.
+  http.get(`${API}/businesses/:id`, ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (params.id !== BUSINESS.id) {
+      return error(404, 'RESOURCE_NOT_FOUND', 'Business not found.');
+    }
+    return ok({ ...BUSINESS });
   }),
 
   // doc 04 §20 — SUPER_ADMIN only.
@@ -432,6 +472,7 @@ export const handlers = [
       lastName: body.lastName!,
       email: body.email!.toLowerCase(),
       phone: body.phone ?? null,
+      avatarUrl: null,
       role: body.role as User['role'],
       status: 'ACTIVE',
       lastLoginAt: null,
@@ -440,16 +481,170 @@ export const handlers = [
     return HttpResponse.json({ data: created }, { status: 201 });
   }),
 
+  // doc 04 §18 — profile updates. Email and role are immutable here.
+  http.patch(`${API}/users/:id`, async ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN']))
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+
+    const target = USERS.find((u) => u.id === params.id);
+    if (!target) return error(404, 'RESOURCE_NOT_FOUND', 'User not found.');
+    if (target.id === user.id) {
+      return error(422, 'INVALID_OPERATION', 'Use your profile page to edit your own details.');
+    }
+    if (target.role === 'SUPER_ADMIN') {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'The platform owner cannot be edited here.');
+    }
+    // doc 07 §57 — an admin manages managers, not other admins.
+    if (
+      user.role === 'ADMIN' &&
+      (target.businessId !== user.businessId || target.role !== 'MANAGER')
+    ) {
+      return error(
+        403,
+        'BUSINESS_ACCESS_DENIED',
+        'Administrators can only edit managers in their own business.',
+      );
+    }
+
+    const body = (await request.json()) as Record<string, string | undefined>;
+    if (body.firstName !== undefined && !body.firstName.trim()) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'firstName', message: 'firstName cannot be empty' },
+      ]);
+    }
+    if (body.lastName !== undefined && !body.lastName.trim()) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'lastName', message: 'lastName cannot be empty' },
+      ]);
+    }
+    // doc 03 §22 — a manager stays pinned to a branch; an admin never has one.
+    if (target.role === 'MANAGER' && body.branchId !== undefined) {
+      const branch = BRANCHES.find((b) => b.id === body.branchId);
+      if (!branch || branch.businessId !== target.businessId) {
+        return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+          { field: 'branchId', message: 'branchId must be a branch of the same business' },
+        ]);
+      }
+      target.branchId = branch.id;
+    }
+    if (target.role === 'ADMIN' && body.branchId) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'branchId', message: 'an administrator cannot be assigned to a branch' },
+      ]);
+    }
+
+    if (body.firstName !== undefined) target.firstName = body.firstName.trim();
+    if (body.lastName !== undefined) target.lastName = body.lastName.trim();
+    if (body.phone !== undefined) target.phone = body.phone ? body.phone : null;
+    return ok(target);
+  }),
+
+  // Not part of the documented contract (doc 04 §19 prefers deactivation), but
+  // an admin may remove a manager outright. Destructive, so it is guarded like
+  // the other user mutations above.
+  http.delete(`${API}/users/:id`, ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN']))
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+
+    const index = USERS.findIndex((u) => u.id === params.id);
+    if (index === -1) return error(404, 'RESOURCE_NOT_FOUND', 'User not found.');
+    const target = USERS[index]!;
+    if (target.id === user.id) {
+      return error(422, 'INVALID_OPERATION', 'You cannot delete your own account.');
+    }
+    if (target.role === 'SUPER_ADMIN') {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'The platform owner cannot be deleted.');
+    }
+    // doc 07 §57 — an admin manages managers, not other admins.
+    if (
+      user.role === 'ADMIN' &&
+      (target.businessId !== user.businessId || target.role !== 'MANAGER')
+    ) {
+      return error(
+        403,
+        'BUSINESS_ACCESS_DENIED',
+        'Administrators can only delete managers in their own business.',
+      );
+    }
+
+    USERS.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // doc 04 §19 — status lives on its own route so suspension never doubles as
+  // an edit. Only ACTIVE / INACTIVE / SUSPENDED are accepted (doc 03 §12).
   http.patch(`${API}/users/:id/status`, async ({ request, params }) => {
     const user = requireAuth(request);
     if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
     if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN']))
       return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+
     const body = (await request.json()) as { status?: string };
+    if (body.status !== 'ACTIVE' && body.status !== 'INACTIVE' && body.status !== 'SUSPENDED') {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'status', message: 'status must be ACTIVE, INACTIVE or SUSPENDED' },
+      ]);
+    }
+
     const target = USERS.find((u) => u.id === params.id);
     if (!target) return error(404, 'RESOURCE_NOT_FOUND', 'User not found.');
-    if (body.status) target.status = body.status as User['status'];
+    if (target.id === user.id) {
+      return error(422, 'INVALID_OPERATION', 'You cannot change the status of your own account.');
+    }
+    if (target.role === 'SUPER_ADMIN') {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'The platform owner cannot be suspended.');
+    }
+    // doc 07 §57 — an admin manages managers, not other admins.
+    if (
+      user.role === 'ADMIN' &&
+      (target.businessId !== user.businessId || target.role !== 'MANAGER')
+    ) {
+      return error(
+        403,
+        'BUSINESS_ACCESS_DENIED',
+        'Administrators can only manage managers in their own business.',
+      );
+    }
+
+    target.status = body.status;
     return ok(target);
+  }),
+
+  /*
+   * Profile photo (PROMPT.md §56). There is no blob storage behind the mock,
+   * so the client reads the picked file as a data URL and the body carries the
+   * string; `null` clears it. A real backend would accept multipart/form-data
+   * and hand back a CDN URL instead. Available to every signed-in role.
+   */
+  http.post(`${API}/users/me/avatar`, async ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+
+    const body = (await request.json()) as { avatarUrl?: unknown };
+    if (
+      body.avatarUrl !== null &&
+      (typeof body.avatarUrl !== 'string' ||
+        !AVATAR_DATA_URL.test(body.avatarUrl) ||
+        body.avatarUrl.length > AVATAR_MAX_CHARS)
+    ) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        {
+          field: 'avatarUrl',
+          message: 'avatarUrl must be a base64 PNG, JPG or WebP data URL (2 MB max) or null',
+        },
+      ]);
+    }
+
+    const target = USERS.find((u) => u.id === user.id);
+    if (!target) return error(404, 'RESOURCE_NOT_FOUND', 'User not found.');
+
+    target.avatarUrl = body.avatarUrl;
+    persistAvatar(target.id, target.avatarUrl);
+    return ok(toAuthenticatedUser(target));
   }),
 
   /* --------------------------------------------------------- fuel types */
@@ -505,6 +700,27 @@ export const handlers = [
     };
     FUEL_TYPES.push(created);
     return HttpResponse.json({ data: created }, { status: 201 });
+  }),
+
+  // doc 08 §13 — `code` is immutable after creation; only name/description.
+  http.patch(`${API}/fuel-types/:id`, async ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN']))
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+
+    const target = FUEL_TYPES.find((f) => f.id === params.id);
+    if (!target) return error(404, 'RESOURCE_NOT_FOUND', 'Fuel type not found.');
+
+    const body = (await request.json()) as { name?: string; description?: string | null };
+    if (body.name !== undefined && !body.name.trim()) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'name', message: 'name cannot be empty' },
+      ]);
+    }
+    if (body.name !== undefined) target.name = body.name.trim();
+    if (body.description !== undefined) target.description = body.description || null;
+    return ok(target);
   }),
 
   /* --------------------------------------------------------- fuel prices */
@@ -669,6 +885,39 @@ export const handlers = [
     return HttpResponse.json({ data: created }, { status: 201 });
   }),
 
+  // doc 03 §34 — `code` stays unique per business after an update.
+  http.patch(`${API}/suppliers/:id`, async ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN']))
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+
+    const target = SUPPLIERS.find((s) => s.id === params.id);
+    if (!target) return error(404, 'RESOURCE_NOT_FOUND', 'Supplier not found.');
+
+    const body = (await request.json()) as Record<string, string | undefined>;
+    if (body.name !== undefined && !body.name.trim()) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'name', message: 'name cannot be empty' },
+      ]);
+    }
+    if (
+      body.code !== undefined &&
+      body.code !== target.code &&
+      SUPPLIERS.some((s) => s.code === body.code)
+    ) {
+      return error(409, 'RESOURCE_ALREADY_EXISTS', 'A supplier with this code already exists.');
+    }
+
+    if (body.name !== undefined) target.name = body.name.trim();
+    if (body.code !== undefined) target.code = body.code;
+    if (body.contactPerson !== undefined) target.contactPerson = body.contactPerson || null;
+    if (body.phone !== undefined) target.phone = body.phone || null;
+    if (body.email !== undefined) target.email = body.email || null;
+    if (body.address !== undefined) target.address = body.address || null;
+    return ok(target);
+  }),
+
   /* -------------------------------------------------------------- tankers */
 
   http.get(`${API}/tankers`, ({ request }) => {
@@ -734,6 +983,45 @@ export const handlers = [
     };
     TANKERS.push(created);
     return HttpResponse.json({ data: created }, { status: 201 });
+  }),
+
+  // doc 03 §36 — the registration stays unique per business after an update.
+  http.patch(`${API}/tankers/:id`, async ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN']))
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+
+    const target = TANKERS.find((t) => t.id === params.id);
+    if (!target) return error(404, 'RESOURCE_NOT_FOUND', 'Tanker not found.');
+
+    const body = (await request.json()) as Record<string, string | number | undefined>;
+    if (
+      body.registrationNumber !== undefined &&
+      body.registrationNumber !== target.registrationNumber &&
+      TANKERS.some((t) => t.registrationNumber === body.registrationNumber)
+    ) {
+      return error(
+        409,
+        'RESOURCE_ALREADY_EXISTS',
+        'A tanker with this registration number already exists.',
+      );
+    }
+    // doc 03 §36 — CHECK (capacity_litres > 0).
+    if (body.capacityLitres !== undefined && Number(body.capacityLitres) <= 0) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'capacityLitres', message: 'capacityLitres must be greater than 0' },
+      ]);
+    }
+
+    if (body.registrationNumber !== undefined) {
+      target.registrationNumber = String(body.registrationNumber).toUpperCase();
+    }
+    if (body.tankerCode !== undefined) target.tankerCode = (body.tankerCode as string) || null;
+    if (body.capacityLitres !== undefined) target.capacityLitres = Number(body.capacityLitres);
+    if (body.driverName !== undefined) target.driverName = (body.driverName as string) || null;
+    if (body.driverPhone !== undefined) target.driverPhone = (body.driverPhone as string) || null;
+    return ok(target);
   }),
 
   /* ---------------------------------------------------------- fuel orders */
@@ -1305,6 +1593,19 @@ export const handlers = [
     rows.sort((a, b) => b.reportDate.localeCompare(a.reportDate));
     const { slice, meta } = paginate(rows, url);
     return ok(slice, meta);
+  }),
+
+  // The drawer re-reads a single report so its actions act on fresh data.
+  http.get(`${API}/daily-reports/:id`, ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    const report = DAILY_REPORTS.find((r) => r.id === params.id);
+    if (!report) return error(404, 'RESOURCE_NOT_FOUND', 'Daily report not found.');
+    // doc 04 §93 — a manager must never see another branch's data.
+    if (user.role === 'MANAGER' && report.branchId !== user.branchId) {
+      return error(403, 'BRANCH_ACCESS_DENIED', 'Access denied.');
+    }
+    return ok(report);
   }),
 
   http.post(`${API}/daily-reports`, async ({ request }) => {

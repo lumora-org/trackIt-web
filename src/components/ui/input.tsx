@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/cn';
 
 const fieldBase =
-  'w-full rounded-xl border bg-white px-3 text-neutral-900 transition-colors placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-neutral-100 disabled:text-neutral-500';
+  'w-full rounded-xl border bg-surface px-3 text-neutral-900 transition-colors placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-neutral-100 disabled:text-neutral-500';
 
 /**
  * Field wrapper providing label, description, error and the aria wiring so

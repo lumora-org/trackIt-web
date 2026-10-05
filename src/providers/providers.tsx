@@ -10,6 +10,7 @@ import { env } from '@/lib/env';
 
 import { MockApiProvider } from './mock-api-provider';
 import { AuthProvider } from './auth-provider';
+import { ThemeProvider } from './theme-provider';
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -45,9 +46,11 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <MockApiProvider>
-        <AuthProvider>{children}</AuthProvider>
-      </MockApiProvider>
+      <ThemeProvider>
+        <MockApiProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </MockApiProvider>
+      </ThemeProvider>
       {env.isDev ? <ReactQueryDevtools initialIsOpen={false} /> : null}
     </QueryClientProvider>
   );

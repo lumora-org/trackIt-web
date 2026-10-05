@@ -1,12 +1,16 @@
 'use client';
 
 import { Menu } from 'lucide-react';
+import Link from 'next/link';
 
+import { PROFILE_ITEM } from '@/lib/navigation';
 import { ROLE_LABELS } from '@/lib/permissions';
-import { initials } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
+import { Avatar } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+
+import { ThemeToggle } from './theme-toggle';
 
 /**
  * Compact header for mobile. The business/branch context lives here so a manager
@@ -16,6 +20,7 @@ export function TopBar({
   businessName,
   branchName,
   userLabel,
+  avatarUrl,
   roleLabel,
   onOpenDrawer,
   unreadCount,
@@ -24,6 +29,7 @@ export function TopBar({
   businessName: string | null;
   branchName: string | null;
   userLabel: string | null;
+  avatarUrl: string | null;
   roleLabel: string | null;
   onOpenDrawer: () => void;
   unreadCount?: number;
@@ -32,7 +38,7 @@ export function TopBar({
   return (
     <header
       className={cn(
-        'safe-top sticky top-0 z-30 border-b border-neutral-200 bg-white/95 backdrop-blur',
+        'safe-top bg-surface/95 sticky top-0 z-30 border-b border-neutral-200 backdrop-blur',
         className,
       )}
     >
@@ -56,28 +62,28 @@ export function TopBar({
         </div>
 
         {unreadCount ? (
-          <span
-            className="bg-danger-500 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-bold text-white"
-            aria-label={`${unreadCount} unread notifications`}
+          <Link
+            href="/notifications"
+            aria-label={`${unreadCount} unread notifications — open notifications`}
+            className="bg-danger-500 hover:opacity-80 inline-flex min-w-5 cursor-pointer items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-bold text-white transition-opacity"
           >
             {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
+          </Link>
         ) : null}
 
-        <span
-          className="bg-brand-100 text-brand-800 flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+        <ThemeToggle />
+
+        <Link
+          href={PROFILE_ITEM.href}
+          aria-label="Open your profile"
+          className="hover:opacity-80 shrink-0 cursor-pointer rounded-full transition-opacity"
           title={userLabel ? `${userLabel} · ${roleLabel ?? ''}` : undefined}
         >
-          {userLabel ? initials(...splitName(userLabel)) : '—'}
-        </span>
+          <Avatar name={userLabel} src={avatarUrl} />
+        </Link>
       </div>
     </header>
   );
-}
-
-function splitName(full: string): [string, string] {
-  const parts = full.trim().split(/\s+/);
-  return [parts[0] ?? '', parts.slice(1).join(' ')];
 }
 
 export { ROLE_LABELS };

@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { login } from '@/api/auth.api';
+import { getCurrentUser, login } from '@/api/auth.api';
 import { resetApiClientForTests, setAccessToken } from '@/api/client';
 import { createBranch, listBranches } from '@/api/branches.api';
 import { createBusiness, listBusinesses } from '@/api/businesses.api';
-import { createUser, createUserSchema, listUsers, setUserStatus } from '@/api/users.api';
+import {
+  createUser,
+  createUserSchema,
+  deleteUser,
+  listUsers,
+  setUserStatus,
+  updateMyAvatar,
+  updateUser,
+  updateUserSchema,
+} from '@/api/users.api';
 import { BRANCHES, USERS } from '@/mocks/data';
 
 async function asAdmin() {
@@ -234,5 +243,118 @@ describe('user creation schema (doc 03 §22, doc 06 §34)', () => {
     expect(
       createUserSchema.safeParse({ ...base, email: 'nope', branchId: BRANCHES[0]!.id }).success,
     ).toBe(false);
+  });
+});
+
+describe('manager administration (doc 04 §18-19, doc 07 §57)', () => {
+  it('updates a manager profile and reassigns their branch', async () => {
+    await asAdmin();
+    const target = USERS.find((u) => u.role === 'MANAGER')!;
+    // Capture before the call: the mock store holds the live row, so reading
+    // `target` after the mutation would see the new values.
+    const originalLastName = target.lastName;
+    const updated = await updateUser(target.id, {
+      firstName: target.firstName,
+      lastName: `${originalLastName}-Edited`,
+      phone: '+2348000000099',
+      branchId: BRANCHES[1]!.id,
+    });
+    expect(updated.lastName).toBe(`${originalLastName}-Edited`);
+    expect(updated.phone).toBe('+2348000000099');
+    expect(updated.branchId).toBe(BRANCHES[1]!.id);
+  });
+
+  it('suspends and reactivates a manager (SUSPENDED blocks sign-in)', async () => {
+    await asAdmin();
+    const target = USERS.find((u) => u.role === 'MANAGER' && u.status === 'ACTIVE')!;
+    const suspended = await setUserStatus(target.id, 'SUSPENDED');
+    expect(suspended.status).toBe('SUSPENDED');
+    const reactivated = await setUserStatus(target.id, 'ACTIVE');
+    expect(reactivated.status).toBe('ACTIVE');
+  });
+
+  it('deletes a manager permanently', async () => {
+    await asAdmin();
+    const target = USERS.find((u) => u.role === 'MANAGER')!;
+    await deleteUser(target.id);
+    const { data } = await listUsers({ limit: 100 });
+    expect(data.some((u) => u.id === target.id)).toBe(false);
+  });
+
+  it('refuses a manager updating users (doc 04 §18)', async () => {
+    await asManager();
+    const target = USERS.find((u) => u.role === 'MANAGER')!;
+    await expect(
+      updateUser(target.id, { firstName: 'Nope', lastName: 'Nope' }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
+
+  it('refuses touching the platform owner (doc 07 §57)', async () => {
+    await asAdmin();
+    const root = USERS.find((u) => u.role === 'SUPER_ADMIN')!;
+    await expect(
+      updateUser(root.id, { firstName: 'Nope', lastName: 'Nope' }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+    });
+    await expect(deleteUser(root.id)).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('refuses changing the status of your own account', async () => {
+    await asSuperAdmin();
+    const root = USERS.find((u) => u.role === 'SUPER_ADMIN')!;
+    await expect(setUserStatus(root.id, 'SUSPENDED')).rejects.toMatchObject({
+      statusCode: 422,
+    });
+  });
+
+  it('validates the update schema without allowing role changes', () => {
+    expect(
+      updateUserSchema.safeParse({
+        firstName: 'A',
+        lastName: 'B',
+        phone: '+2348000000000',
+        branchId: BRANCHES[0]!.id,
+      }).success,
+    ).toBe(true);
+    expect(updateUserSchema.safeParse({ firstName: '', lastName: 'B' }).success).toBe(false);
+    // There is deliberately no `role` field to mutate.
+    expect('role' in updateUserSchema.shape).toBe(false);
+  });
+});
+
+describe('profile avatar (own photo, any role)', () => {
+  // A valid 1x1 PNG so the data URL shape check is exercised for real.
+  const PNG_DATA_URL =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('stores a photo for the signed-in user and serves it via /auth/me', async () => {
+    await asManager();
+    const updated = await updateMyAvatar(PNG_DATA_URL);
+    expect(updated.avatarUrl).toBe(PNG_DATA_URL);
+
+    const me = await getCurrentUser();
+    expect(me.avatarUrl).toBe(PNG_DATA_URL);
+  });
+
+  it('clears the photo when sent null', async () => {
+    await asManager();
+    await updateMyAvatar(PNG_DATA_URL);
+    const cleared = await updateMyAvatar(null);
+    expect(cleared.avatarUrl).toBeNull();
+  });
+
+  it('rejects a payload that is not an image data URL', async () => {
+    await asManager();
+    await expect(updateMyAvatar('https://example.com/avatar.png')).rejects.toMatchObject({
+      statusCode: 400,
+    });
+  });
+
+  it('requires authentication', async () => {
+    resetApiClientForTests();
+    await expect(updateMyAvatar(PNG_DATA_URL)).rejects.toMatchObject({ statusCode: 401 });
   });
 });

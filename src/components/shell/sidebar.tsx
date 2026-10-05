@@ -58,7 +58,7 @@ export function Sidebar({
   onSignOut: () => void;
 }) {
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-neutral-200 bg-white lg:flex">
+    <aside className="hidden w-64 shrink-0 flex-col border-r border-neutral-200 bg-surface lg:flex">
       <div className="flex items-center gap-2.5 border-b border-neutral-200 px-4 py-4">
         <span className="bg-brand-600 flex size-9 shrink-0 items-center justify-center rounded-xl text-white">
           <Fuel className="size-5" aria-hidden="true" />

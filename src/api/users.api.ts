@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { apiClient } from './client';
 import { PASSWORD_MIN_LENGTH } from './auth.api';
-import type { AccountStatus, PageMeta, User, UserRole } from '@/types/domain';
+import type { AccountStatus, AuthenticatedUser, PageMeta, User, UserRole } from '@/types/domain';
 
 export type UserFilters = {
   page?: number;
@@ -51,6 +51,52 @@ export async function createUser(input: CreateUserInput): Promise<User> {
 export async function setUserStatus(id: string, status: AccountStatus): Promise<User> {
   return apiClient.patch<User>(`/users/${id}/status`, { status });
 }
+
+/** doc 04 §18 — profile fields only; email and role are immutable here. */
+export async function updateUser(id: string, input: UpdateUserInput): Promise<User> {
+  return apiClient.patch<User>(`/users/${id}`, {
+    firstName: input.firstName,
+    lastName: input.lastName,
+    // An empty phone clears the column on the server.
+    phone: input.phone ? input.phone : null,
+    branchId: input.branchId ? input.branchId : undefined,
+  });
+}
+
+/**
+ * Permanently removes the account. The documented contract has no DELETE route
+ * (doc 04 §19 prefers deactivation), so this only works against the mock —
+ * keep the UI offering suspension as the reversible option.
+ */
+export async function deleteUser(id: string): Promise<void> {
+  await apiClient.delete<void>(`/users/${id}`);
+}
+
+/**
+ * PROMPT.md §56 — profile photo. The mock has no blob storage, so the picked
+ * file is read client-side into a data URL and the server stores the string;
+ * `null` removes the photo. A real backend would take a multipart upload and
+ * return a CDN URL instead.
+ */
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+export const AVATAR_SUPPORTED_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+
+export async function updateMyAvatar(avatarUrl: string | null): Promise<AuthenticatedUser> {
+  return apiClient.post<AuthenticatedUser>('/users/me/avatar', { avatarUrl });
+}
+
+export const updateUserSchema = z.object({
+  firstName: z.string().trim().min(1, 'First name is required').max(100),
+  lastName: z.string().trim().min(1, 'Last name is required').max(100),
+  phone: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^[+]?[\d\s()-]{7,20}$/.test(v), 'Enter a valid phone number')
+    .optional(),
+  branchId: z.string().optional(),
+});
+
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 
 export const createUserSchema = z
   .object({

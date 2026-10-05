@@ -70,7 +70,7 @@ export function BusinessesPage() {
     return (
       <div className="space-y-5">
         <h1 className="text-xl font-bold text-neutral-900">Businesses</h1>
-        <p className="rounded-card border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-600">
+        <p className="rounded-card border border-neutral-200 bg-surface p-6 text-center text-sm text-neutral-600">
           Only a super administrator can view the business list. Sign in with a super administrator
           account to manage businesses on the platform.
         </p>

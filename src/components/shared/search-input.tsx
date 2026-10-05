@@ -62,7 +62,7 @@ export function SearchInput({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         placeholder={placeholder}
-        className="min-h-touch focus:border-brand-500 focus:ring-brand-500 w-full rounded-xl border border-neutral-300 bg-white pr-10 pl-9 text-neutral-900 placeholder:text-neutral-400 focus:ring-2 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+        className="min-h-touch focus:border-brand-500 focus:ring-brand-500 w-full rounded-xl border border-neutral-300 bg-surface pr-10 pl-9 text-neutral-900 placeholder:text-neutral-400 focus:ring-2 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
       />
       {draft ? (
         <button
@@ -102,7 +102,7 @@ export function FilterSelect({
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="min-h-touch focus:border-brand-500 focus:ring-brand-500 w-full appearance-none rounded-xl border border-neutral-300 bg-white pr-8 pl-3 text-sm font-medium text-neutral-800 focus:ring-2 focus:outline-none"
+        className="min-h-touch focus:border-brand-500 focus:ring-brand-500 w-full appearance-none rounded-xl border border-neutral-300 bg-surface pr-8 pl-3 text-sm font-medium text-neutral-800 focus:ring-2 focus:outline-none"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

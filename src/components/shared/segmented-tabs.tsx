@@ -48,7 +48,7 @@ export function SegmentedTabs<T extends string>({
             className={cn(
               'min-h-touch focus-visible:outline-brand-600 flex-1 rounded-lg px-3 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-2',
               selected
-                ? 'bg-white text-neutral-900 shadow-xs'
+                ? 'bg-surface text-neutral-900 shadow-xs'
                 : 'text-neutral-600 hover:text-neutral-900',
             )}
           >

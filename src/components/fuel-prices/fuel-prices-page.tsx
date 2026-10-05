@@ -120,7 +120,7 @@ export function FuelPricesPage() {
               className={`min-h-touch focus-visible:outline-brand-600 rounded-xl px-4 font-mono text-sm font-semibold transition-colors focus-visible:outline-2 ${
                 selected
                   ? 'bg-brand-600 text-white'
-                  : 'bg-white text-neutral-700 ring-1 ring-neutral-300 hover:bg-neutral-50'
+                  : 'bg-surface text-neutral-700 ring-1 ring-neutral-300 hover:bg-neutral-50'
               }`}
             >
               {fuel.code}

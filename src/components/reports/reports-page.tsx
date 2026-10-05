@@ -331,7 +331,7 @@ function TotalCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-card border border-neutral-200 bg-white p-4 shadow-xs">
+    <div className="rounded-card border border-neutral-200 bg-surface p-4 shadow-xs">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-medium text-neutral-600">{label}</p>
         <span className="flex size-9 items-center justify-center rounded-xl bg-neutral-100">

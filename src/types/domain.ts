@@ -31,6 +31,8 @@ export interface AuthenticatedUser {
   lastName: string;
   email: string;
   phone: string | null;
+  /** Profile photo as a data URL (PROMPT.md §56); null when not uploaded. */
+  avatarUrl: string | null;
   role: UserRole;
   /** doc 03 §12 `account_status`. Only ACTIVE may authenticate (doc 06 §21). */
   status: AccountStatus;
@@ -89,6 +91,7 @@ export interface User {
   lastName: string;
   email: string;
   phone: string | null;
+  avatarUrl: string | null;
   role: UserRole;
   status: AccountStatus;
   lastLoginAt: string | null;
