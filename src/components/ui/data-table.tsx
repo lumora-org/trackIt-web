@@ -47,6 +47,8 @@ export interface DataTableProps<T> {
   emptyTitle?: string;
   emptyDescription?: string;
   emptyAction?: { label: string; onClick?: () => void };
+  /** Icon for the empty state (PROMPT.md §19 — a meaningful empty state). */
+  emptyIcon?: React.ComponentType<{ className?: string }>;
   loading?: boolean;
   loadingLabel?: string;
   error?: string | null;
@@ -66,6 +68,7 @@ export function DataTable<T>({
   emptyTitle = 'Nothing to show yet',
   emptyDescription,
   emptyAction,
+  emptyIcon,
   loading = false,
   loadingLabel,
   error,
@@ -80,7 +83,14 @@ export function DataTable<T>({
   if (error) return <ErrorState message={error} onRetry={onRetry} />;
 
   if (data.length === 0) {
-    return <EmptyState title={emptyTitle} description={emptyDescription} action={emptyAction} />;
+    return (
+      <EmptyState
+        title={emptyTitle}
+        description={emptyDescription}
+        action={emptyAction}
+        icon={emptyIcon}
+      />
+    );
   }
 
   const cardColumns = columns.filter((c) => !c.mobileHidden);
