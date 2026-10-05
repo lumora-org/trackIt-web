@@ -953,3 +953,42 @@ export function buildManagerDashboard(branchId: string): ManagerDashboard {
     dailyReport: report ? { status: report.status } : null,
   };
 }
+
+/* ------------------------------------------------------------ test reset */
+
+/**
+ * The mock handlers mutate these collections in place (that is how a real
+ * backend behaves), which means state leaks between tests. Each test must
+ * therefore start from the seed, not from whatever the previous test left behind.
+ *
+ * A pristine snapshot is taken at module load and restored in place — the arrays
+ * themselves are never reassigned, because `handlers.ts` holds references to them.
+ */
+const MUTABLE_COLLECTIONS = {
+  BRANCHES,
+  FUEL_ORDERS,
+  DELIVERIES,
+  INVENTORY_STOCK,
+  INVENTORY_TRANSACTIONS,
+  SALES,
+  DAILY_REPORTS,
+  NOTIFICATIONS,
+  AUDIT_LOGS,
+  USERS,
+  FUEL_PRICES,
+  SUPPLIERS,
+  TANKERS,
+  FUEL_TYPES,
+} as const;
+
+const PRISTINE = Object.fromEntries(
+  Object.entries(MUTABLE_COLLECTIONS).map(([key, rows]) => [key, structuredClone(rows)]),
+) as Record<keyof typeof MUTABLE_COLLECTIONS, unknown[]>;
+
+export function resetMockData(): void {
+  for (const key of Object.keys(MUTABLE_COLLECTIONS) as Array<keyof typeof MUTABLE_COLLECTIONS>) {
+    const target = MUTABLE_COLLECTIONS[key] as unknown[];
+    target.length = 0;
+    target.push(...structuredClone(PRISTINE[key]));
+  }
+}

@@ -2,7 +2,8 @@ import '@testing-library/jest-dom/vitest';
 import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import { server } from '@/mocks/server';
-import { configureApiClient } from '@/api/client';
+import { resetMockData } from '@/mocks/data';
+import { configureApiClient, resetApiClientForTests } from '@/api/client';
 
 // Deterministic timezone so currency/date formatting assertions are stable.
 // Nigeria is UTC+1 year-round (WAT); docs render timestamps in local time.
@@ -21,6 +22,10 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  // The mock handlers mutate their collections like a real backend, so state
+  // would otherwise leak between tests.
+  resetMockData();
+  resetApiClientForTests();
   vi.clearAllMocks();
 });
 

@@ -816,12 +816,13 @@ export const handlers = [
 
       if (target === 'CANCELLED') {
         const body = (await request.json().catch(() => ({}))) as { reason?: string };
-        if (!body.reason) {
+        // doc 04 §46 — a reason is mandatory, and whitespace is not a reason.
+        if (!body.reason || body.reason.trim().length === 0) {
           return error(400, 'VALIDATION_ERROR', 'Validation failed', [
             { field: 'reason', message: 'reason is required' },
           ]);
         }
-        order.notes = body.reason!;
+        order.notes = body.reason.trim();
       }
 
       order.status = target;
