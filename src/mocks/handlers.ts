@@ -15,6 +15,7 @@ import { http, HttpResponse } from 'msw';
 import type {
   ApiFieldError,
   AuthenticatedUser,
+  Branch,
   DailyReport,
   Delivery,
   FuelOrder,
@@ -263,6 +264,47 @@ export const handlers = [
     return ok(slice, meta);
   }),
 
+  // doc 04 §20 — SUPER_ADMIN only.
+  http.post(`${API}/businesses`, async ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (user.role !== 'SUPER_ADMIN') return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+
+    const body = (await request.json()) as Record<string, string>;
+    if (!body.name) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'name', message: 'name is required' },
+      ]);
+    }
+
+    BUSINESS.name = body.name;
+    BUSINESS.registrationNumber = body.registrationNumber ?? BUSINESS.registrationNumber;
+    BUSINESS.email = body.email ?? BUSINESS.email;
+    BUSINESS.phone = body.phone ?? BUSINESS.phone;
+    BUSINESS.address = body.address ?? BUSINESS.address;
+    return HttpResponse.json({ data: { ...BUSINESS } }, { status: 201 });
+  }),
+
+  // doc 04 §23 — there is no /branches/:id/status, so status goes through PATCH.
+  http.patch(`${API}/branches/:id`, async ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['ADMIN', 'SUPER_ADMIN'])) {
+      return error(403, 'BRANCH_ACCESS_DENIED', 'Access denied.');
+    }
+    const branch = BRANCHES.find((b) => b.id === params.id);
+    if (!branch) return error(404, 'RESOURCE_NOT_FOUND', 'Branch not found.');
+
+    const body = (await request.json()) as Partial<Branch>;
+    if (body.name) branch.name = body.name;
+    if (body.code) branch.code = body.code;
+    if (body.address) branch.address = body.address;
+    if (body.phone !== undefined) branch.phone = body.phone;
+    // doc 03 §14 — branch_status has only ACTIVE / INACTIVE.
+    if (body.status) branch.status = body.status;
+    return ok(branch);
+  }),
+
   /* ----------------------------------------------------------- branches */
 
   http.get(`${API}/branches`, ({ request }) => {
@@ -301,6 +343,11 @@ export const handlers = [
     if (!body.address) fieldErrors.push({ field: 'address', message: 'address is required' });
     if (fieldErrors.length > 0)
       return error(400, 'VALIDATION_ERROR', 'Validation failed', fieldErrors);
+
+    // doc 03 §27 — UNIQUE (business_id, code)
+    if (BRANCHES.some((b) => b.code === body.code)) {
+      return error(409, 'RESOURCE_ALREADY_EXISTS', 'A branch with this code already exists.');
+    }
 
     const branch = {
       id: crypto.randomUUID(),

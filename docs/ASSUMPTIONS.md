@@ -234,6 +234,56 @@ is surfaced as an error, never hidden.
 comes from the API. Display-only multiplication (e.g. litres × unit price on the sale preview) uses
 `toAmount()` and is always labelled "Estimated"; the backend recomputes on submit.
 
+### 3.15 `GET /reports/*` has query parameters but no response schema
+
+`04` §79–82 document `GET /reports/sales`, `/reports/inventory`, `/reports/deliveries` and
+`/reports/daily-reports` with a documented `from` / `to` / `branchId` query set — but **no response
+body example**, exactly like `GET /dashboard/inventory`.
+
+**Decision:** the Reports screen reads the *resource* endpoints (`/sales`, `/inventory`,
+`/deliveries`, `/daily-reports`), whose schemas are fully documented, and computes its own
+per-period rollups from those records. `fetchSalesReport()` and friends exist in
+`src/api/reports.api.ts` but are not called, so switching to the report endpoints later is a
+one-line change per tab.
+
+The **export** endpoints *are* wired, because `04` §83 documents their contract
+(`format=xlsx`, `from`, `to`, `branchId`) and `05` §115 documents the `Content-Disposition:
+attachment` response. They are plain anchor navigations, not JSON fetches.
+
+### 3.16 No documented endpoint sets `UNDER_REVIEW`
+
+Covered in §3.3, but the *consequence* is worth stating: the transition map deliberately omits
+`UNDER_REVIEW` as a target so the UI never offers an action the backend cannot perform. A unit test
+asserts no state's transitions ever include it.
+
+### 3.17 Delivery creation has no documented role assignment, and no UI
+
+`04` §48 restricts `POST /deliveries` to `ADMIN` / `SUPER_ADMIN`, but no doc describes who
+*creates* a delivery relative to an order. `03` §40 makes `fuel_order_id` and `tanker_id`
+non-nullable, so a delivery cannot exist without both.
+
+**Decision:** no delivery-creation screen is built. Deliveries are created as part of the order →
+transit flow, whose exact shape is not documented. Receiving (the operationally important half, and
+the half `PROMPT.md` §11 specifies) is fully implemented. A screen that guessed at creation would be
+inventing a workflow.
+
+### 3.18 `daily_reports` has no discrepancy field
+
+`03` §58 defines `Opening + Deliveries − Sales + Adjustments = Closing` and says "any discrepancy
+should be flagged", but there is no `discrepancy` or `variance` column anywhere.
+
+**Decision:** `reconcileReport()` recomputes the balance client-side and renders a warning when it
+does not match. It is presentation-only and never writes anything back.
+
+### 3.19 Notification payloads are inferred from the table, not an example
+
+`04` §72–74 give endpoints and filters but no response example. Field names come from the `03` §59
+table in camelCase.
+
+**Decision:** `resourceType`, `resourceId` and `readAt` are modelled as possibly absent, and
+"open related resource" only links to a route that actually exists — an unrecognised
+`resourceType` yields no link rather than a guessed URL.
+
 ---
 
 ## 4. Out of MVP scope

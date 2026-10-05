@@ -59,6 +59,26 @@ npm run test         # vitest run
 npm run verify       # typecheck + lint + test
 ```
 
+## Routes
+
+| Route                                           | Roles                     | Purpose                             |
+| ----------------------------------------------- | ------------------------- | ----------------------------------- |
+| `/login`, `/forgot-password`, `/reset-password` | public                    | Authentication                      |
+| `/dashboard`                                    | all                       | Role-aware operational overview     |
+| `/sales`                                        | all                       | Record a sale; admin can void       |
+| `/inventory`                                    | all                       | Stock, movement ledger, adjustments |
+| `/deliveries`                                   | all                       | Receive a delivery, dispute it      |
+| `/daily-reports`                                | all                       | Create / submit / approve / reject  |
+| `/fuel-orders`                                  | all (read), admin (write) | Procurement and lifecycle           |
+| `/fuel-types`, `/fuel-prices`                   | all (read), admin (write) | Fuel configuration                  |
+| `/suppliers`, `/tankers`                        | all (read), admin (write) | Supply chain                        |
+| `/branches`, `/users`                           | admin                     | Configuration                       |
+| `/businesses`                                   | super admin               | Platform tenants                    |
+| `/reports`                                      | admin                     | Period summaries + XLSX export      |
+| `/audit-logs`                                   | admin                     | Append-only activity log            |
+| `/notifications`                                | all                       | Notification centre                 |
+| `/profile`                                      | all                       | Own profile, change own password    |
+
 ## Documentation
 
 The `docs/` folder is the source of truth. Read it before changing anything.
