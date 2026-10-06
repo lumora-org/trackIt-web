@@ -38,6 +38,11 @@ export async function listAuditLogs(
   });
 }
 
+/** doc 04 §88 — read a single audit entry. */
+export async function getAuditLog(id: string): Promise<AuditLog> {
+  return apiClient.get<AuditLog>(`/audit-logs/${id}`);
+}
+
 /** doc 04 §88 — the canonical action list. */
 export const AUDIT_ACTION_FILTER_OPTIONS = [
   { value: '', label: 'All actions' },

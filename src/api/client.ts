@@ -59,7 +59,15 @@ export interface ApiClientConfig {
   fetchImpl?: typeof fetch;
 }
 
-const DEFAULT_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+/**
+ * Empty by default: the browser then talks to its own origin and a Next.js
+ * rewrite forwards `/api/v1/*` to the backend (`API_PROXY_TARGET`, see
+ * `next.config.ts`). Setting `NEXT_PUBLIC_API_BASE_URL` instead calls the API
+ * origin directly — then the backend must list this origin in `CORS_ORIGIN`.
+ * Either way, promoting localhost to a hosted URL is an env change, never a
+ * code change.
+ */
+const DEFAULT_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 let config: ApiClientConfig = { baseUrl: DEFAULT_BASE_URL };
 
@@ -78,11 +86,11 @@ export function getApiBaseUrl(): string {
  * base URL is an origin only (`http://localhost:4000`). Callers pass resource
  * paths such as `/auth/login`.
  *
- * In mock mode `baseUrl` is empty and the MSW worker serves `/api/v1/*` from the
- * page's own origin, so the request stays same-origin — but `fetch` rejects a
- * relative URL outside a browser. Resolving against the current origin (or a
- * localhost fallback under Node/test) keeps both environments working while
- * still producing an absolute URL.
+ * In mock and proxy mode `baseUrl` is empty and the request stays same-origin —
+ * the MSW worker (mock) or a Next.js rewrite (proxy) serves `/api/v1/*` — but
+ * `fetch` rejects a relative URL outside a browser. Resolving against the
+ * current origin (or a localhost fallback under Node/test) keeps both
+ * environments working while still producing an absolute URL.
  */
 export function resolveUrl(path: string, query = ''): string {
   const base = config.baseUrl.replace(/\/$/, '');
@@ -211,7 +219,7 @@ async function rawRequest(
   const token = getAccessToken();
   if (token && !options.skipAuth) headers.Authorization = `Bearer ${token}`;
 
-  const init: RequestInit = { method, headers };
+  const init: RequestInit = { method, headers, credentials: 'include' };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   if (options.signal) init.signal = options.signal;
 
