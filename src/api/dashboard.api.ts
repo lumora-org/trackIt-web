@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { apiClient } from './client';
+import { queryKeys } from '@/lib/query-keys';
 import type { AdminDashboard, ManagerDashboard } from '@/types/domain';
 
 /**
@@ -11,8 +12,16 @@ import type { AdminDashboard, ManagerDashboard } from '@/types/domain';
  * unknowable. See ASSUMPTIONS.md §3.7.
  */
 
-/** doc 04 §76 — ADMIN, SUPER_ADMIN. Optional branchId filter. */
-export function fetchAdminDashboard(filters?: { from?: string; to?: string; branchId?: string }) {
+/**
+ * doc 04 §76 — ADMIN, SUPER_ADMIN. Optional branchId filter; `businessId` is
+ * a SUPER_ADMIN-only scope (omitted, the overview aggregates every business).
+ */
+export function fetchAdminDashboard(filters?: {
+  from?: string;
+  to?: string;
+  branchId?: string;
+  businessId?: string;
+}) {
   return apiClient.get<AdminDashboard>('/dashboard/admin', { query: filters });
 }
 
@@ -21,11 +30,11 @@ export function fetchManagerDashboard() {
   return apiClient.get<ManagerDashboard>('/dashboard/manager');
 }
 
-export function useAdminDashboard(enabled: boolean) {
+export function useAdminDashboard(enabled: boolean, businessId?: string | null) {
   return useQuery({
-    queryKey: ['dashboard', 'admin'],
+    queryKey: queryKeys.dashboard.admin({ businessId: businessId ?? null }),
     // Wrapped so TanStack Query's context object is not passed as `filters`.
-    queryFn: () => fetchAdminDashboard(),
+    queryFn: () => fetchAdminDashboard({ businessId: businessId ?? undefined }),
     enabled,
     // doc 05 §117 — a dashboard summary may be cached briefly, but must not be
     // served stale for long.

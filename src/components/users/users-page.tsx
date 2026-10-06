@@ -28,7 +28,7 @@ import { ConfirmDialog, Dialog } from '@/components/ui/dialog';
 import { Input, Select } from '@/components/ui/input';
 import { SearchInput, FilterSelect } from '@/components/shared/search-input';
 import { InlineError } from '@/components/ui/states';
-import { ROLE_LABELS } from '@/lib/permissions';
+import { can, ROLE_LABELS } from '@/lib/permissions';
 import { queryKeys } from '@/lib/query-keys';
 import type { AccountStatus, User, UserRole } from '@/types/domain';
 import { useAuth } from '@/providers/auth-provider';
@@ -46,6 +46,9 @@ import { useBranchContext } from '@/providers/branch-provider';
 export function UsersPage() {
   const { branches } = useBranchContext();
   const { user: caller } = useAuth();
+  // Product decision: suspending/deleting users is ADMIN work; the platform
+  // role gets a read-only list.
+  const canManage = can(caller?.role, 'user.manage');
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -125,6 +128,8 @@ export function UsersPage() {
       align: 'right',
       mobileHidden: true,
       render: (u) => {
+        // Product decision: managing users is ADMIN-only work.
+        if (!canManage) return null;
         // Nobody acts on their own row, and the platform owner is out of scope.
         if (!caller || caller.id === u.id || u.role === 'SUPER_ADMIN') return null;
         // doc 07 §57 — an admin manages managers, not other admins.
@@ -172,10 +177,12 @@ export function UsersPage() {
             manager permanently.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <UserPlus className="size-4" aria-hidden="true" />
-          Add user
-        </Button>
+        {canManage ? (
+          <Button onClick={() => setCreateOpen(true)}>
+            <UserPlus className="size-4" aria-hidden="true" />
+            Add user
+          </Button>
+        ) : null}
       </header>
 
       <div className="flex flex-col gap-3 sm:flex-row">

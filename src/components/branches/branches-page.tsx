@@ -18,8 +18,10 @@ import { Dialog } from '@/components/ui/dialog';
 import { Input, Select } from '@/components/ui/input';
 import { FilterSelect, SearchInput } from '@/components/shared/search-input';
 import { InlineError } from '@/components/ui/states';
+import { can } from '@/lib/permissions';
 import { queryKeys } from '@/lib/query-keys';
 import type { Branch, BranchStatus } from '@/types/domain';
+import { useAuth } from '@/providers/auth-provider';
 
 /**
  * doc 03 §27 — `address` is NOT NULL, `phone` is nullable, and `code` is unique
@@ -49,6 +51,10 @@ type BranchFormValues = z.infer<typeof branchFormSchema>;
  * lists them but no column exists (ASSUMPTIONS.md §3.5).
  */
 export function BranchesPage() {
+  const { user } = useAuth();
+  // Product decision: adding or deactivating a branch is ADMIN work; the
+  // platform role sees the list read-only.
+  const canManage = can(user?.role, 'branch.manage');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'' | BranchStatus>('');
   const [editing, setEditing] = useState<Branch | null>(null);
@@ -95,18 +101,20 @@ export function BranchesPage() {
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Branches</h1>
           <p className="text-sm text-neutral-500">
-            Stations belonging to this business. Each has its own inventory.
+            Stations belonging to this business. Each has its own products.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setEditing(null);
-            setFormOpen(true);
-          }}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          Add branch
-        </Button>
+        {canManage ? (
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Add branch
+          </Button>
+        ) : null}
       </header>
 
       <div className="flex flex-col gap-3 sm:flex-row">
@@ -139,10 +147,14 @@ export function BranchesPage() {
         loadingLabel="Loading branches"
         error={listQuery.error?.message ?? null}
         onRetry={() => listQuery.refetch()}
-        onRowClick={(b) => {
-          setEditing(b);
-          setFormOpen(true);
-        }}
+        onRowClick={
+          canManage
+            ? (b) => {
+                setEditing(b);
+                setFormOpen(true);
+              }
+            : undefined
+        }
         emptyTitle="No branches yet"
         emptyDescription="Add your first station to start recording inventory and sales."
         emptyIcon={Building2}

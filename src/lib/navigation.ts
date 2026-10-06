@@ -65,8 +65,8 @@ const dashboard = (role: UserRole): NavItem => ({
 /* ---------------------------------------------------------- manager first */
 
 /**
- * doc 02 §39 lists exactly this manager set: Dashboard, Sales, Inventory,
- * Deliveries, Daily Reports, Report History, Notifications.
+ * doc 02 §39 lists exactly this manager set: Dashboard, Record Sale, Products,
+ * Deliveries, Daily Reports, Notifications.
  */
 const MANAGER_NAV: RoleNav = {
   groups: [
@@ -83,7 +83,7 @@ const MANAGER_NAV: RoleNav = {
         },
         {
           href: '/inventory',
-          label: 'Inventory',
+          label: 'Products',
           icon: Package,
           capabilities: ['inventory.view'],
         },
@@ -125,7 +125,7 @@ const MANAGER_NAV: RoleNav = {
     },
     {
       href: '/inventory',
-      label: 'Inventory',
+      label: 'Products',
       icon: Package,
       capabilities: ['inventory.view'],
     },
@@ -148,14 +148,8 @@ const ADMIN_NAV: RoleNav = {
       title: 'Operations',
       items: [
         {
-          href: '/sales',
-          label: 'Sales',
-          icon: ShoppingCart,
-          capabilities: ['sales.view'],
-        },
-        {
           href: '/inventory',
-          label: 'Inventory',
+          label: 'Products',
           icon: Package,
           capabilities: ['inventory.view'],
         },
@@ -253,7 +247,7 @@ const ADMIN_NAV: RoleNav = {
     dashboard('ADMIN'),
     {
       href: '/inventory',
-      label: 'Inventory',
+      label: 'Products',
       icon: Package,
       capabilities: ['inventory.view'],
     },
@@ -287,12 +281,6 @@ const SUPER_ADMIN_NAV: RoleNav = {
           label: 'Businesses',
           icon: Building2,
           capabilities: ['business.view'],
-        },
-        {
-          href: '/branches',
-          label: 'Branches',
-          icon: Building2,
-          capabilities: ['branch.view'],
         },
         {
           href: '/users',

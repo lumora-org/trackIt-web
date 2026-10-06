@@ -146,7 +146,7 @@ export function FuelOrderDetailDrawer({
               ))}
             </ul>
             <p className="mt-3 text-xs text-neutral-500">
-              An order does not add stock. Inventory increases only when a delivery is received (doc
+              An order does not add stock. Stock increases only when a delivery is received (doc
               09 §1).
             </p>
           </section>

@@ -56,7 +56,6 @@ const FUEL_ORDER_TONES: Record<string, BadgeTone> = {
 const DELIVERY_TONES: Record<string, BadgeTone> = {
   PENDING: 'warning',
   RECEIVED: 'success',
-  DISPUTED: 'danger',
   CANCELLED: 'neutral',
 };
 
@@ -87,6 +86,9 @@ const NOTIFICATION_TONES: Record<string, BadgeTone> = {
   DELIVERY_RECEIVED: 'success',
   DELIVERY_DISCREPANCY: 'danger',
   LOW_INVENTORY: 'warning',
+  FUEL_PRICE_UPDATE: 'info',
+  DELIVERY_IN_TRANSIT: 'warning',
+  DAILY_REPORT_MISSING: 'danger',
   SYSTEM: 'neutral',
 };
 

@@ -33,7 +33,14 @@ export function DashboardPage() {
 
 function AdminDashboardView() {
   const { user } = useAuth();
-  const { data, isLoading, error, refetch } = useAdminDashboard(true);
+  const { activeBusiness, activeBusinessId } = useBranchContext();
+  // A SUPER_ADMIN scopes the overview through the business switcher; without a
+  // selection the API aggregates every business on the platform.
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const { data, isLoading, error, refetch } = useAdminDashboard(
+    true,
+    isSuperAdmin ? activeBusinessId : null,
+  );
 
   if (error) return <ErrorState message={error.message} onRetry={() => refetch()} />;
 
@@ -46,7 +53,13 @@ function AdminDashboardView() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Dashboard</h1>
-          <p className="text-sm text-neutral-500">Business-wide operational overview</p>
+          <p className="text-sm text-neutral-500">
+            {isSuperAdmin
+              ? activeBusiness
+                ? `${activeBusiness.name} overview`
+                : 'Platform-wide overview across every business'
+              : 'Business-wide operational overview'}
+          </p>
         </div>
         {user ? <Badge tone="brand">{fullName(user)}</Badge> : null}
       </header>
@@ -124,7 +137,9 @@ function AdminDashboardView() {
                 <li key={branch.branchId}>
                   <div className="mb-1.5 flex items-baseline justify-between gap-3">
                     <span className="text-sm font-medium text-neutral-900">
-                      {branch.branchName}
+                      {isSuperAdmin && !activeBusinessId && branch.businessName
+                        ? `${branch.businessName} — ${branch.branchName}`
+                        : branch.branchName}
                     </span>
                     <span className="text-sm text-neutral-700">
                       <CurrencyDisplay value={branch.revenue} />

@@ -543,7 +543,7 @@ export const DELIVERIES: Delivery[] = [
   {
     id: '12000000-0000-4000-8000-000000000005',
     deliveryNumber: 'DEL-2026-000005',
-    status: 'DISPUTED',
+    status: 'RECEIVED',
     fuelOrderId: FUEL_ORDERS[1]!.id,
     tankerId: TANKERS[1]!.id,
     destinationBranchId: BRANCHES[0]!.id,
@@ -932,6 +932,8 @@ export function buildAdminDashboard(): AdminDashboard {
     branches: BRANCHES.map((b) => {
       const rows = SALES.filter((s) => s.branchId === b.id);
       return {
+        businessId: b.businessId,
+        businessName: BUSINESS.name,
         branchId: b.id,
         branchName: b.name,
         fuelSoldLitres: rows.reduce((sum, s) => sum + s.litresSold, 0),

@@ -5,7 +5,10 @@
  * authority (doc 06 §56 — "Frontend authorization = UX / Backend authorization =
  * Security"). Nothing here is a security control; it only decides what to render.
  *
- * Matrix source: doc 06 §28 and doc 07 §56.
+ * Matrix source: doc 06 §28 and doc 07 §56, adjusted by product decision
+ * (2026-10): SUPER_ADMIN no longer manages branches or users — that is the
+ * ADMIN's job; the platform role adds businesses as a whole. ADMIN no longer
+ * has a Sales view: sales totals are recorded by branch managers only.
  */
 
 import type { UserRole } from '@/types/domain';
@@ -56,9 +59,7 @@ const ROLE_CAPABILITIES: Record<UserRole, ReadonlySet<Capability>> = {
     'business.view',
     'business.manage',
     'branch.view',
-    'branch.manage',
     'user.view',
-    'user.manage',
     'fuelType.view',
     'fuelType.manage',
     'fuelPrice.view',
@@ -103,7 +104,8 @@ const ROLE_CAPABILITIES: Record<UserRole, ReadonlySet<Capability>> = {
     'delivery.receive',
     'inventory.view',
     'inventory.adjust',
-    'sales.view',
+    // Product decision: no Sales tab in the admin view; managers record the
+    // day's totals. sales.void stays only as a vestige of the old matrix.
     'sales.void',
     'dailyReport.view',
     'dailyReport.review',

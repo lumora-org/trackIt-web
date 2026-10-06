@@ -9,6 +9,8 @@ export interface FuelTypeFilters {
   limit?: number;
   search?: string;
   status?: ResourceStatus;
+  /** SUPER_ADMIN only: scope the list to one business. */
+  businessId?: string;
 }
 
 export async function listFuelTypes(
@@ -20,6 +22,7 @@ export async function listFuelTypes(
       limit: filters.limit ?? 20,
       search: filters.search,
       status: filters.status,
+      businessId: filters.businessId,
     },
   });
 }

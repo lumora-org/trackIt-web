@@ -1282,33 +1282,6 @@ export const handlers = [
     return ok(delivery);
   }),
 
-  http.post(`${API}/deliveries/:id/dispute`, async ({ request, params }) => {
-    const user = requireAuth(request);
-    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
-    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN', 'MANAGER'])) {
-      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
-    }
-    const delivery = DELIVERIES.find((d) => d.id === params.id);
-    if (!delivery) return error(404, 'RESOURCE_NOT_FOUND', 'Delivery not found.');
-    if (delivery.status !== 'PENDING') {
-      return error(
-        422,
-        'INVALID_DELIVERY_STATUS',
-        `A ${delivery.status.toLowerCase()} delivery cannot be disputed.`,
-      );
-    }
-    const body = (await request.json()) as { reason?: string };
-    if (!body.reason) {
-      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
-        { field: 'reason', message: 'reason is required' },
-      ]);
-    }
-    // doc 09 §20 — a cancelled/disputed delivery must not increase inventory.
-    delivery.status = 'DISPUTED';
-    delivery.notes = body.reason!;
-    return ok(delivery);
-  }),
-
   /* ----------------------------------------------------------- inventory */
 
   http.get(`${API}/inventory`, ({ request }) => {

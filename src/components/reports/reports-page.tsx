@@ -196,7 +196,6 @@ function DeliveriesReport({ range }: { range: { from?: string; to?: string; bran
 
   const rows = query.data?.data ?? [];
   const received = rows.filter((d) => d.status === 'RECEIVED');
-  const disputed = rows.filter((d) => d.status === 'DISPUTED');
   const totalReceived = received.reduce(
     (sum, d) => sum + d.items.reduce((s, i) => s + (i.actualQuantityLitres ?? 0), 0),
     0,
@@ -218,7 +217,6 @@ function DeliveriesReport({ range }: { range: { from?: string; to?: string; bran
           label="Deliveries received"
           icon={Download}
           value={received.length.toLocaleString('en-NG')}
-          hint={`${disputed.length} disputed`}
         />
         <TotalCard
           label="Net variance"

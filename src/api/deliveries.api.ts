@@ -62,18 +62,6 @@ export async function receiveDelivery(
   );
 }
 
-/**
- * doc 04 §51 — the dispute body is a single `reason` string, not an items array.
- * A disputed delivery must not increase inventory (doc 09 §20).
- */
-export async function disputeDelivery(id: string, reason: string): Promise<Delivery> {
-  return apiClient.post<Delivery>(
-    `/deliveries/${id}/dispute`,
-    { reason },
-    { idempotencyKey: crypto.randomUUID() },
-  );
-}
-
 /* ------------------------------------------------------------ validation */
 
 /*
@@ -95,18 +83,12 @@ export const receiveDeliverySchema = z.object({
 
 export type ReceiveDeliveryValues = z.infer<typeof receiveDeliverySchema>;
 
-export const disputeDeliverySchema = z.object({
-  reason: z.string().trim().min(1, 'A reason is required').max(1000, 'Reason is too long'),
-});
-
-export type DisputeDeliveryValues = z.infer<typeof disputeDeliverySchema>;
-
 /**
  * doc 03 §42 — `difference = actual − expected`, so a shortage is negative.
  *
- * NOTE: no variance *tolerance* is documented anywhere (ASSUMPTIONS.md §3.2), so
- * this does not decide whether a delivery must be disputed. It only labels the
- * discrepancy; the manager chooses, and the backend remains authoritative.
+ * NOTE: no variance *tolerance* is documented anywhere (ASSUMPTIONS.md §3.2),
+ * so this only labels the discrepancy on the receiving screen; the manager
+ * records a reason and the backend remains authoritative.
  */
 export function computeVariance(
   expected: number,

@@ -14,7 +14,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/input';
 import { FilterSelect } from '@/components/shared/search-input';
-import { InlineError } from '@/components/ui/states';
+import { InlineError, EmptyState } from '@/components/ui/states';
 import { formatDateTime, formatLitres } from '@/lib/format';
 import { can } from '@/lib/permissions';
 import { invalidateForResource, queryKeys } from '@/lib/query-keys';
@@ -34,6 +34,7 @@ import { RecordSalePanel } from './record-sale-form';
 export function SalesPage() {
   const { user } = useAuth();
   const { activeBranchIds } = useBranchContext();
+  const canView = can(user?.role, 'sales.view');
   const canVoid = can(user?.role, 'sales.void');
 
   const branchId = activeBranchIds.length === 1 ? activeBranchIds[0] : undefined;
@@ -127,6 +128,19 @@ export function SalesPage() {
   ];
 
   const sales = listQuery.data?.data ?? [];
+
+  // Product decision: only managers record sales, so the admin view has no
+  // Sales tab. A direct URL still answers with an explanatory empty state
+  // instead of the ledger.
+  if (!canView) {
+    return (
+      <EmptyState
+        title="Sales are recorded by managers"
+        description="Branch managers send the day's total litres sold from their own account, so the Sales page is not part of the admin view."
+        icon={ShoppingCart}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">

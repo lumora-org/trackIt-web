@@ -7,12 +7,14 @@ export interface BranchFilters {
   limit?: number;
   search?: string;
   status?: Branch['status'];
+  /** SUPER_ADMIN only: scope the list to one business (doc 04 §21.1). */
+  businessId?: string;
 }
 
 /**
  * doc 04 §21.1 — the response is already scoped by the backend: an admin receives
- * their business's branches, a manager only their assigned branch. No
- * businessId is ever sent (doc 04 §92).
+ * their business's branches, a manager only their assigned branch. A businessId
+ * is only ever sent by a SUPER_ADMIN viewing a specific business.
  */
 export async function listBranches(
   filters: BranchFilters = {},
@@ -23,6 +25,7 @@ export async function listBranches(
       limit: filters.limit ?? 100,
       search: filters.search,
       status: filters.status,
+      businessId: filters.businessId,
     },
   });
 }

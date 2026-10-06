@@ -37,7 +37,7 @@ import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
 
 /**
- * Inventory (PROMPT.md §31 step 13, §10).
+ * Products (the inventory ledger; PROMPT.md §31 step 13, §10).
  *
  * Current stock is a glanceable summary; the ledger below it shows date, type,
  * quantity, balance and reference, with positive and negative movements
@@ -172,7 +172,7 @@ export function InventoryPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-neutral-900">Inventory</h1>
+          <h1 className="text-xl font-bold text-neutral-900">Products</h1>
           <p className="text-sm text-neutral-500">Current stock and the full movement history.</p>
         </div>
         {canAdjust ? (
@@ -186,7 +186,7 @@ export function InventoryPage() {
       {/* -------------------------------------------------- current stock */}
       <section>
         <CardHeader className="border-0 px-0 pb-2">
-          <CardTitle>Current inventory</CardTitle>
+          <CardTitle>Current stock</CardTitle>
         </CardHeader>
 
         {stockQuery.isLoading ? (
@@ -201,7 +201,7 @@ export function InventoryPage() {
           <Card>
             <CardBody className="p-0">
               <EmptyState
-                title="No inventory recorded"
+                title="No stock recorded"
                 description="Stock appears here once an opening balance, delivery or adjustment is recorded."
                 icon={Package}
               />
@@ -232,7 +232,7 @@ export function InventoryPage() {
             {/* Table for wide screens where there is room for it. */}
             <div className="mt-4 hidden md:block">
               <DataTable
-                caption="Current inventory"
+                caption="Current stock"
                 columns={stockColumns}
                 data={stock}
                 rowKey={(r) => `${r.branchId}-${r.fuelTypeId}`}
@@ -281,12 +281,12 @@ export function InventoryPage() {
         </div>
 
         <DataTable
-          caption="Inventory movement history"
+          caption="Stock movement history"
           columns={ledgerColumns}
           data={ledgerQuery.data?.data ?? []}
           rowKey={(r) => r.id}
           loading={ledgerQuery.isLoading}
-          loadingLabel="Loading inventory history"
+          loadingLabel="Loading stock history"
           error={ledgerQuery.error?.message ?? null}
           onRetry={() => ledgerQuery.refetch()}
           meta={ledgerQuery.data?.meta ?? null}

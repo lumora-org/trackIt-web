@@ -1,21 +1,20 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ShieldQuestion } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
 
 import { isApiError } from '@/api/errors';
 import {
   computeVariance,
   DISCREPANCY_REASONS,
-  disputeDelivery,
   receiveDelivery,
 } from '@/api/deliveries.api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { DetailRow, SectionHeading } from '@/components/ui/stat-card';
-import { Input, Select, Textarea } from '@/components/ui/input';
+import { Input, Select } from '@/components/ui/input';
 import { InlineError } from '@/components/ui/states';
 import { cn } from '@/lib/cn';
 import { formatDateTime, formatLitres } from '@/lib/format';
@@ -26,8 +25,8 @@ import type { Delivery } from '@/types/domain';
  * Receiving a delivery (PROMPT.md §11).
  *
  * The flow a manager needs on a phone: review the order, see the tanker and
- * driver, enter the ACTUAL quantity, see the variance, add a reason, then accept
- * or dispute.
+ * driver, enter the ACTUAL quantity, see the variance, add a reason, then
+ * accept. (The old dispute path was removed by product decision.)
  *
  * Only `actualQuantityLitres` is ever sent (doc 04 §50). Expected quantity is
  * read-only context. A discrepancy produces a prominent warning but never
@@ -254,71 +253,4 @@ function allReasonsSet(delivery: Delivery, reasons: Record<string, string>): boo
     const value = reasons[item.fuelTypeId];
     return typeof value === 'string' && value.trim().length > 0;
   });
-}
-
-/* ------------------------------------------------------------- dispute */
-
-/**
- * doc 04 §51 — dispute takes a single reason. doc 05 §60 makes DISPUTED terminal,
- * so this is presented as a deliberate, somewhat irreversible choice
- * (ASSUMPTIONS.md §3.4).
- */
-export function DisputeDeliveryForm({
-  delivery,
-  onDisputed,
-}: {
-  delivery: Delivery;
-  onDisputed?: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const [reason, setReason] = useState('');
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const mutation = useMutation({
-    mutationFn: () => disputeDelivery(delivery.id, reason.trim()),
-    onSuccess: () => {
-      for (const key of invalidateForResource('deliveries')) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
-      onDisputed?.();
-    },
-    onError: (err) => {
-      setFormError(isApiError(err) ? err.message : 'Unable to dispute this delivery.');
-    },
-  });
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-card border-danger-500/30 bg-danger-50 flex items-start gap-3 border px-4 py-3">
-        <ShieldQuestion className="text-danger-700 mt-0.5 size-5 shrink-0" aria-hidden="true" />
-        <p className="text-danger-700 text-sm">
-          Disputing records the problem without adding fuel to inventory. There is no documented
-          route to resolve a dispute, so an administrator will need to follow up.
-        </p>
-      </div>
-
-      {formError ? <InlineError message={formError} /> : null}
-
-      <Textarea
-        label="Reason for disputing"
-        placeholder="Received quantity differs significantly from supplier documentation."
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        disabled={mutation.isPending}
-        required
-      />
-
-      <Button
-        variant="danger"
-        block
-        size="lg"
-        disabled={reason.trim().length === 0}
-        loading={mutation.isPending}
-        loadingText="Disputing"
-        onClick={() => mutation.mutate()}
-      >
-        Dispute delivery
-      </Button>
-    </div>
-  );
 }

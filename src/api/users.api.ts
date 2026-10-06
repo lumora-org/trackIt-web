@@ -12,6 +12,8 @@ export type UserFilters = {
   role?: UserRole;
   status?: AccountStatus;
   branchId?: string;
+  /** SUPER_ADMIN only: scope the list to one business (doc 04 §17). */
+  businessId?: string;
 };
 
 export async function listUsers(
@@ -25,6 +27,7 @@ export async function listUsers(
       role: filters.role,
       status: filters.status,
       branchId: filters.branchId,
+      businessId: filters.businessId,
     },
   });
 }

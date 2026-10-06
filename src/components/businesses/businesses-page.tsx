@@ -2,7 +2,8 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Plus } from 'lucide-react';
+import { Building2, ChevronRight, Plus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
@@ -15,10 +16,9 @@ import {
 } from '@/api/businesses.api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DataTable, type Column } from '@/components/ui/data-table';
 import { Dialog } from '@/components/ui/dialog';
 import { Input, Textarea } from '@/components/ui/input';
-import { InlineError } from '@/components/ui/states';
+import { EmptyState, InlineError, SkeletonCard } from '@/components/ui/states';
 import { queryKeys } from '@/lib/query-keys';
 import type { Business } from '@/types/domain';
 
@@ -27,44 +27,17 @@ import type { Business } from '@/types/domain';
  *
  * SUPER_ADMIN only — an administrator manages their own business and cannot see
  * this list, so the screen states that plainly rather than rendering an
- * unexplained 403.
+ * unexplained 403. Businesses render as a card grid; opening a card shows the
+ * business's branches, users and configuration.
  */
 export function BusinessesPage() {
   const [createOpen, setCreateOpen] = useState(false);
+  const router = useRouter();
 
   const listQuery = useQuery({
     queryKey: queryKeys.businesses.list(),
     queryFn: () => listBusinesses(),
   });
-
-  const columns: Column<Business>[] = [
-    {
-      key: 'name',
-      header: 'Business',
-      primary: true,
-      render: (b) => <span className="font-semibold">{b.name}</span>,
-    },
-    {
-      key: 'registrationNumber',
-      header: 'Registration',
-      secondary: true,
-      render: (b) => b.registrationNumber ?? '—',
-    },
-    { key: 'email', header: 'Email', render: (b) => b.email ?? '—' },
-    { key: 'phone', header: 'Phone', mobileHidden: true, render: (b) => b.phone ?? '—' },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (b) => (
-        <Badge
-          tone={b.status === 'ACTIVE' ? 'success' : b.status === 'SUSPENDED' ? 'danger' : 'neutral'}
-          size="sm"
-        >
-          {b.status}
-        </Badge>
-      ),
-    },
-  ];
 
   if (listQuery.isError) {
     return (
@@ -77,6 +50,8 @@ export function BusinessesPage() {
       </div>
     );
   }
+
+  const businesses = listQuery.data?.data ?? [];
 
   return (
     <div className="space-y-5">
@@ -91,22 +66,87 @@ export function BusinessesPage() {
         </Button>
       </header>
 
-      <DataTable
-        caption="Businesses"
-        columns={columns}
-        data={listQuery.data?.data ?? []}
-        rowKey={(b) => b.id}
-        loading={listQuery.isLoading}
-        loadingLabel="Loading businesses"
-        error={errorMessage(listQuery.error)}
-        onRetry={() => listQuery.refetch()}
-        emptyTitle="No businesses yet"
-        emptyDescription="Add the first business to start onboarding administrators."
-        emptyIcon={Building2}
-      />
+      {listQuery.isLoading ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : businesses.length === 0 ? (
+        <EmptyState
+          title="No businesses yet"
+          description="Add the first business to start onboarding administrators."
+          icon={Building2}
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {businesses.map((business) => (
+            <BusinessCard
+              key={business.id}
+              business={business}
+              onOpen={() => router.push(`/businesses/${business.id}`)}
+            />
+          ))}
+        </div>
+      )}
 
       <CreateBusinessDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
+  );
+}
+
+function BusinessCard({ business, onOpen }: { business: Business; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="rounded-card focus-visible:outline-brand-600 flex h-full flex-col border border-neutral-200 bg-surface p-4 text-left shadow-xs transition-colors hover:border-brand-500/50 focus-visible:outline-2"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="bg-brand-50 text-brand-700 flex size-10 shrink-0 items-center justify-center rounded-lg">
+            <Building2 className="size-5" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-neutral-900">{business.name}</p>
+            <p className="truncate text-xs text-neutral-500">
+              {business.registrationNumber ?? 'No registration number'}
+            </p>
+          </div>
+        </div>
+        <Badge
+          tone={
+            business.status === 'ACTIVE'
+              ? 'success'
+              : business.status === 'SUSPENDED'
+                ? 'danger'
+                : 'neutral'
+          }
+          size="sm"
+        >
+          {business.status}
+        </Badge>
+      </div>
+
+      <dl className="mt-4 space-y-1 text-sm text-neutral-600">
+        <div className="flex justify-between gap-3">
+          <dt className="shrink-0 text-neutral-500">Email</dt>
+          <dd className="truncate">{business.email ?? '—'}</dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt className="shrink-0 text-neutral-500">Phone</dt>
+          <dd>{business.phone ?? '—'}</dd>
+        </div>
+      </dl>
+
+      <span className="text-brand-700 mt-4 flex items-center gap-1 text-xs font-semibold">
+        View business
+        <ChevronRight className="size-3.5" aria-hidden="true" />
+      </span>
+    </button>
   );
 }
 
@@ -204,9 +244,4 @@ function CreateBusinessDialog({ open, onClose }: { open: boolean; onClose: () =>
       </div>
     </Dialog>
   );
-}
-
-/** Normalises an unknown query error into displayable text (PROMPT.md §20). */
-function errorMessage(error: unknown): string | null {
-  return error instanceof Error && error.message ? error.message : null;
 }

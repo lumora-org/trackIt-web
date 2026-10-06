@@ -220,8 +220,9 @@ export interface FuelOrder {
 
 /* -------------------------------------------------------------- deliveries */
 
-/** doc 03 §16 — exact enum. */
-export const DELIVERY_STATUSES = ['PENDING', 'RECEIVED', 'DISPUTED', 'CANCELLED'] as const;
+/** DISPUTED was removed from the workflow (product decision); the DB enum
+ * keeps the historical value but nothing emits it any more. */
+export const DELIVERY_STATUSES = ['PENDING', 'RECEIVED', 'CANCELLED'] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
 export interface DeliveryItem {
@@ -402,6 +403,9 @@ export const NOTIFICATION_TYPES = [
   'DELIVERY_RECEIVED',
   'DELIVERY_DISCREPANCY',
   'LOW_INVENTORY',
+  'FUEL_PRICE_UPDATE',
+  'DELIVERY_IN_TRANSIT',
+  'DAILY_REPORT_MISSING',
   'SYSTEM',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -434,6 +438,9 @@ export interface AdminDashboard {
     lowInventoryBranches: number;
   };
   branches: Array<{
+    businessId: string;
+    /** Present on every row; only shown when viewing across businesses. */
+    businessName: string;
     branchId: string;
     branchName: string;
     fuelSoldLitres: number;
@@ -478,7 +485,6 @@ export const AUDIT_ACTIONS = [
   'FUEL_ORDER_CANCELLED',
   'DELIVERY_CREATED',
   'DELIVERY_RECEIVED',
-  'DELIVERY_DISPUTED',
   'INVENTORY_ADJUSTED',
   'SALE_CREATED',
   'SALE_VOIDED',

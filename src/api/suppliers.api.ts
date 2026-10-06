@@ -9,6 +9,8 @@ export interface SupplierFilters {
   limit?: number;
   search?: string;
   status?: ResourceStatus;
+  /** SUPER_ADMIN only: scope the list to one business. */
+  businessId?: string;
 }
 
 export async function listSuppliers(
@@ -20,6 +22,7 @@ export async function listSuppliers(
       limit: filters.limit ?? 20,
       search: filters.search,
       status: filters.status,
+      businessId: filters.businessId,
     },
   });
 }

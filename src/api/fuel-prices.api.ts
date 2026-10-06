@@ -23,6 +23,8 @@ export interface FuelPriceFilters {
   active?: boolean;
   from?: string;
   to?: string;
+  /** SUPER_ADMIN only: scope the list to one business. */
+  businessId?: string;
 }
 
 export async function listFuelPrices(
@@ -36,6 +38,7 @@ export async function listFuelPrices(
       active: filters.active === true ? 'true' : undefined,
       from: filters.from,
       to: filters.to,
+      businessId: filters.businessId,
     },
   });
 }

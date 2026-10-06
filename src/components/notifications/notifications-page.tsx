@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   Package,
   ShieldCheck,
+  Tag,
   Truck,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -46,8 +47,11 @@ const TYPE_ICONS: Record<NotificationType, React.ComponentType<{ className?: str
   REPORT_APPROVED: ShieldCheck,
   REPORT_REJECTED: AlertTriangle,
   DELIVERY_RECEIVED: Truck,
+  DELIVERY_IN_TRANSIT: Truck,
   DELIVERY_DISCREPANCY: Package,
   LOW_INVENTORY: Package,
+  FUEL_PRICE_UPDATE: Tag,
+  DAILY_REPORT_MISSING: AlertTriangle,
   SYSTEM: Bell,
 };
 
@@ -60,6 +64,7 @@ const RESOURCE_ROUTES: Record<string, (id: string) => string> = {
   DAILY_REPORT: (id) => `/daily-reports?report=${id}`,
   DELIVERY: (id) => `/deliveries?delivery=${id}`,
   BRANCH: () => '/inventory',
+  FUEL_PRICE: () => '/fuel-prices',
   SALE: () => '/sales',
 };
 
@@ -164,7 +169,7 @@ export function NotificationsPage() {
             ) : null}
           </h1>
           <p className="text-sm text-neutral-500">
-            Delivery activity, daily report decisions and stock warnings.
+            Price updates, delivery activity, daily report reminders and stock warnings.
           </p>
         </div>
         {unread > 0 ? (
@@ -210,7 +215,10 @@ export function NotificationsPage() {
             { value: 'REPORT_REJECTED', label: 'Report rejected' },
             { value: 'DELIVERY_RECEIVED', label: 'Delivery received' },
             { value: 'DELIVERY_DISCREPANCY', label: 'Delivery discrepancy' },
+            { value: 'DELIVERY_IN_TRANSIT', label: 'Delivery in transit' },
             { value: 'LOW_INVENTORY', label: 'Low inventory' },
+            { value: 'FUEL_PRICE_UPDATE', label: 'Price update' },
+            { value: 'DAILY_REPORT_MISSING', label: 'Report missing' },
             { value: 'SYSTEM', label: 'System' },
           ]}
         />

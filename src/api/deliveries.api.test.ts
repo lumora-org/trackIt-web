@@ -4,11 +4,9 @@ import { login } from '@/api/auth.api';
 import { resetApiClientForTests, setAccessToken } from '@/api/client';
 import {
   computeVariance,
-  disputeDelivery,
   listDeliveries,
   receiveDelivery,
   receiveDeliverySchema,
-  disputeDeliverySchema,
 } from '@/api/deliveries.api';
 import { BRANCHES, DELIVERIES, FUEL_TYPES } from '@/mocks/data';
 import { INVENTORY_STOCK } from '@/mocks/data';
@@ -78,11 +76,6 @@ describe('receive delivery validation (doc 09 §13 — quantity >= 0)', () => {
 
   it('requires at least one item', () => {
     expect(receiveDeliverySchema.safeParse({ items: [] }).success).toBe(false);
-  });
-
-  it('requires a dispute reason', () => {
-    expect(disputeDeliverySchema.safeParse({ reason: '  ' }).success).toBe(false);
-    expect(disputeDeliverySchema.safeParse({ reason: 'Mismatch' }).success).toBe(true);
   });
 });
 
@@ -157,34 +150,6 @@ describe('receiving a delivery', () => {
         { fuelTypeId: otherBranch.items[0]!.fuelTypeId, actualQuantityLitres: 100 },
       ]),
     ).rejects.toMatchObject({ statusCode: 403, code: 'BRANCH_ACCESS_DENIED' });
-  });
-});
-
-describe('disputing a delivery', () => {
-  it('marks the delivery DISPUTED', async () => {
-    await asAdmin();
-    const pending = DELIVERIES.find((d) => d.status === 'PENDING')!;
-    const updated = await disputeDelivery(pending.id, 'Quantity differs significantly.');
-    expect(updated.status).toBe('DISPUTED');
-  });
-
-  it('does not increase inventory (doc 09 §20)', async () => {
-    await asAdmin();
-    const pending = DELIVERIES.find((d) => d.status === 'PENDING')!;
-    const stockBefore = INVENTORY_STOCK.reduce((sum, s) => sum + s.currentQuantityLitres, 0);
-
-    await disputeDelivery(pending.id, 'Mismatch.');
-
-    const stockAfter = INVENTORY_STOCK.reduce((sum, s) => sum + s.currentQuantityLitres, 0);
-    expect(stockAfter).toBe(stockBefore);
-  });
-
-  it('requires a reason (doc 04 §51)', async () => {
-    await asAdmin();
-    const pending = DELIVERIES.find((d) => d.status === 'PENDING')!;
-    await expect(disputeDelivery(pending.id, '')).rejects.toMatchObject({
-      statusCode: 400,
-    });
   });
 });
 

@@ -49,7 +49,6 @@ export const AUDIT_ACTION_FILTER_OPTIONS = [
   { value: 'SALE_CREATED', label: 'Sale recorded' },
   { value: 'SALE_VOIDED', label: 'Sale voided' },
   { value: 'DELIVERY_RECEIVED', label: 'Delivery received' },
-  { value: 'DELIVERY_DISPUTED', label: 'Delivery disputed' },
   { value: 'INVENTORY_ADJUSTED', label: 'Inventory adjusted' },
   { value: 'FUEL_ORDER_CREATED', label: 'Fuel order created' },
   { value: 'FUEL_ORDER_SUBMITTED', label: 'Fuel order submitted' },

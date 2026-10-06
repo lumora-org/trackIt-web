@@ -33,8 +33,18 @@ import { useBranchContext } from '@/providers/branch-provider';
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout, scopeError } = useAuth();
-  const { activeBranch, branches, canSwitchBranch, setActiveBranchId, isViewingAllBranches } =
-    useBranchContext();
+  const {
+    activeBranch,
+    branches,
+    canSwitchBranch,
+    setActiveBranchId,
+    isViewingAllBranches,
+    businesses,
+    activeBusiness,
+    activeBusinessId,
+    setActiveBusinessId,
+  } = useBranchContext();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
@@ -60,8 +70,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     },
     enabled: Boolean(user),
     // No polling interval is documented anywhere (see ASSUMPTIONS.md §3.8); this
-    // is a pragmatic assumption for an in-app badge.
-    refetchInterval: 60_000,
+    // is a pragmatic assumption for an in-app badge. Window-focus refetch keeps
+    // the count climbing as notifications arrive without waiting a full cycle.
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   const bottomBar = visibleBottomBar(user?.role);
@@ -85,8 +97,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
-          businessName={businessQuery.data?.name ?? 'K.B.Y GLOBAL INVESTMENT'}
-          branchName={activeBranch?.name ?? null}
+          businessName={
+            isSuperAdmin ? (activeBusiness?.name ?? null) : (businessQuery.data?.name ?? 'K.B.Y GLOBAL INVESTMENT')
+          }
+          branchName={isSuperAdmin ? null : (activeBranch?.name ?? null)}
           userLabel={user ? fullName(user) : null}
           avatarUrl={user?.avatarUrl ?? null}
           roleLabel={user ? ROLE_LABELS[user.role] : null}
@@ -99,18 +113,35 @@ export function AppShell({ children }: { children: ReactNode }) {
           the TopBar so it stays visible without consuming vertical space.
         */}
         <div className="hidden items-center gap-3 border-b border-neutral-200 bg-surface px-6 py-2 lg:flex">
-          <span className="flex items-center gap-1.5 text-sm text-neutral-600">
-            <Building2 className="size-4 text-neutral-400" aria-hidden="true" />
-            {businessQuery.data?.name ?? '—'}
-          </span>
+          {isSuperAdmin ? (
+            <>
+              <span className="flex items-center gap-1.5 text-sm text-neutral-600">
+                <Building2 className="size-4 text-neutral-400" aria-hidden="true" />
+                {activeBusiness?.name ?? 'All businesses'}
+              </span>
 
-          <BranchSwitcher
-            branches={branches}
-            activeBranchId={activeBranch?.id ?? null}
-            canSwitch={canSwitchBranch}
-            viewingAll={isViewingAllBranches}
-            onChange={setActiveBranchId}
-          />
+              <BusinessSwitcher
+                businesses={businesses}
+                activeBusinessId={activeBusinessId}
+                onChange={setActiveBusinessId}
+              />
+            </>
+          ) : (
+            <>
+              <span className="flex items-center gap-1.5 text-sm text-neutral-600">
+                <Building2 className="size-4 text-neutral-400" aria-hidden="true" />
+                {businessQuery.data?.name ?? '—'}
+              </span>
+
+              <BranchSwitcher
+                branches={branches}
+                activeBranchId={activeBranch?.id ?? null}
+                canSwitch={canSwitchBranch}
+                viewingAll={isViewingAllBranches}
+                onChange={setActiveBranchId}
+              />
+            </>
+          )}
 
           {user ? (
             <Badge tone="brand" size="sm" className="ml-auto">
@@ -179,16 +210,24 @@ export function AppShell({ children }: { children: ReactNode }) {
           </>
         }
       >
-        <BranchSwitcher
-          branches={branches}
-          activeBranchId={activeBranch?.id ?? null}
-          canSwitch={canSwitchBranch}
-          viewingAll={isViewingAllBranches}
-          onChange={(id) => {
-            setActiveBranchId(id);
-            setDrawerOpen(false);
-          }}
-        />
+        {isSuperAdmin ? (
+          <BusinessSwitcher
+            businesses={businesses}
+            activeBusinessId={activeBusinessId}
+            onChange={setActiveBusinessId}
+          />
+        ) : (
+          <BranchSwitcher
+            branches={branches}
+            activeBranchId={activeBranch?.id ?? null}
+            canSwitch={canSwitchBranch}
+            viewingAll={isViewingAllBranches}
+            onChange={(id) => {
+              setActiveBranchId(id);
+              setDrawerOpen(false);
+            }}
+          />
+        )}
 
         <nav aria-label="All sections" className="mt-4 space-y-5">
           {visibleGroups(role).map((group) => (
@@ -288,6 +327,53 @@ function BranchSwitcher({
         aria-hidden="true"
       />
       {viewingAll ? <span className="sr-only">Showing all branches</span> : null}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------- business switcher */
+
+/**
+ * The platform-level context: a SUPER_ADMIN scopes the session to one
+ * business (or none, for the platform-wide view). It drives the dashboard and
+ * the business detail view; the branch switcher above stays admin-only.
+ */
+function BusinessSwitcher({
+  businesses,
+  activeBusinessId,
+  onChange,
+}: {
+  businesses: Array<{ id: string; name: string }>;
+  activeBusinessId: string | null;
+  onChange: (businessId: string | null) => void;
+}) {
+  if (businesses.length === 0) {
+    return <span className="text-sm text-neutral-500">All businesses</span>;
+  }
+
+  return (
+    <div className="relative">
+      <label htmlFor="business-switcher" className="sr-only">
+        Filter by business
+      </label>
+      <select
+        id="business-switcher"
+        value={activeBusinessId ?? ''}
+        onChange={(e) => onChange(e.target.value || null)}
+        className="focus:border-brand-500 focus:ring-brand-500 min-h-9 appearance-none rounded-lg border border-neutral-300 bg-surface py-1 pr-8 pl-2.5 text-sm font-medium text-neutral-800 focus:ring-2 focus:outline-none"
+      >
+        <option value="">All businesses</option>
+        {businesses.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-neutral-500"
+        aria-hidden="true"
+      />
+      {activeBusinessId ? null : <span className="sr-only">Showing all businesses</span>}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from 're
 import { apiClient } from '@/api/client';
 import { isBranchScoped } from '@/lib/permissions';
 import { queryKeys } from '@/lib/query-keys';
-import type { Branch } from '@/types/domain';
+import type { Branch, Business } from '@/types/domain';
 
 import { useAuth } from './auth-provider';
 
@@ -26,6 +26,16 @@ interface BranchContextValue {
   canSwitchBranch: boolean;
   setActiveBranchId: (branchId: string | null) => void;
   isLoading: boolean;
+  /**
+   * SUPER_ADMIN only: the platform businesses. Picking one scopes the
+   * session (dashboard, and the business detail view); null means the
+   * platform-wide view across every business.
+   */
+  businesses: Business[];
+  activeBusiness: Business | null;
+  activeBusinessId: string | null;
+  canSwitchBusiness: boolean;
+  setActiveBusinessId: (businessId: string | null) => void;
 }
 
 const BranchContext = createContext<BranchContextValue | null>(null);
@@ -37,6 +47,7 @@ const BranchContext = createContext<BranchContextValue | null>(null);
  */
 export function BranchProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
   const branchesQuery = useQuery({
     queryKey: queryKeys.branches.list(),
@@ -45,7 +56,17 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     staleTime: 5 * 60_000,
   });
 
+  // The business list is a SUPER_ADMIN endpoint; admins and managers would
+  // only get a 403, so the query is disabled for them.
+  const businessesQuery = useQuery({
+    queryKey: queryKeys.businesses.list(),
+    queryFn: () => apiClient.list<Business>('/businesses', { query: { limit: 100 } }),
+    enabled: Boolean(isSuperAdmin),
+    staleTime: 5 * 60_000,
+  });
+
   const branches = useMemo(() => branchesQuery.data?.data ?? [], [branchesQuery.data]);
+  const businesses = useMemo(() => businessesQuery.data?.data ?? [], [businessesQuery.data]);
 
   /**
    * Selection is intentionally *not* persisted to storage: a stale branch id from
@@ -53,6 +74,12 @@ export function BranchProvider({ children }: { children: ReactNode }) {
    * in component state means it always resets with the session.
    */
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(user?.branchId ?? null);
+
+  /**
+   * The SUPER_ADMIN's business scope. Like the branch selection it is session
+   * state: null means the platform-wide view across every business.
+   */
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null);
 
   /*
    * A manager's branch is fixed. If the stored selection ever diverges from
@@ -66,6 +93,11 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const activeBranch = useMemo(
     () => branches.find((b) => b.id === effectiveSelectedId) ?? null,
     [branches, effectiveSelectedId],
+  );
+
+  const activeBusiness = useMemo(
+    () => businesses.find((b) => b.id === selectedBusinessId) ?? null,
+    [businesses, selectedBusinessId],
   );
 
   const value = useMemo<BranchContextValue>(() => {
@@ -87,6 +119,11 @@ export function BranchProvider({ children }: { children: ReactNode }) {
       canSwitchBranch,
       setActiveBranchId: setSelectedBranchId,
       isLoading: branchesQuery.isLoading,
+      businesses,
+      activeBusiness,
+      activeBusinessId: isSuperAdmin ? selectedBusinessId : null,
+      canSwitchBusiness: Boolean(isSuperAdmin),
+      setActiveBusinessId: setSelectedBusinessId,
     };
   }, [
     branches,
@@ -95,6 +132,10 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     user,
     setSelectedBranchId,
     branchesQuery.isLoading,
+    businesses,
+    activeBusiness,
+    isSuperAdmin,
+    selectedBusinessId,
   ]);
 
   return <BranchContext.Provider value={value}>{children}</BranchContext.Provider>;

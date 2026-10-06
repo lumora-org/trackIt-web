@@ -7,7 +7,6 @@ import { useState } from 'react';
 import { getDelivery, listDeliveries, type DeliveryFilters } from '@/api/deliveries.api';
 import { QuantityDisplay } from '@/components/ui/amount';
 import { StatusBadge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import type { Column } from '@/components/ui/data-table';
 import { DataTable } from '@/components/ui/data-table';
 import { Drawer } from '@/components/ui/dialog';
@@ -21,7 +20,7 @@ import type { Delivery, DeliveryStatus } from '@/types/domain';
 import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
 
-import { DeliveryReceiveForm, DisputeDeliveryForm } from './delivery-receive-form';
+import { DeliveryReceiveForm } from './delivery-receive-form';
 
 /**
  * Deliveries (PROMPT.md §31 step 12).
@@ -37,7 +36,6 @@ export function DeliveriesPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [disputing, setDisputing] = useState(false);
 
   const branchId = activeBranchIds.length === 1 ? activeBranchIds[0] : undefined;
 
@@ -119,7 +117,6 @@ export function DeliveriesPage() {
             { value: '', label: 'All statuses' },
             { value: 'PENDING', label: 'Pending' },
             { value: 'RECEIVED', label: 'Received' },
-            { value: 'DISPUTED', label: 'Disputed' },
             { value: 'CANCELLED', label: 'Cancelled' },
           ]}
         />
@@ -144,10 +141,7 @@ export function DeliveriesPage() {
 
       <Drawer
         open={Boolean(selectedId)}
-        onClose={() => {
-          setSelectedId(null);
-          setDisputing(false);
-        }}
+        onClose={() => setSelectedId(null)}
         title="Receive delivery"
         description={delivery?.deliveryNumber ?? undefined}
       >
@@ -158,24 +152,7 @@ export function DeliveriesPage() {
 
         {delivery ? (
           delivery.status === 'PENDING' && canReceive ? (
-            disputing ? (
-              <DisputeDeliveryForm
-                delivery={delivery}
-                onDisputed={() => {
-                  setDisputing(false);
-                  setSelectedId(null);
-                }}
-              />
-            ) : (
-              <>
-                <DeliveryReceiveForm delivery={delivery} onReceived={() => setSelectedId(null)} />
-                <div className="mt-4 border-t border-neutral-200 pt-4">
-                  <Button variant="outline" block onClick={() => setDisputing(true)}>
-                    Dispute this delivery
-                  </Button>
-                </div>
-              </>
-            )
+            <DeliveryReceiveForm delivery={delivery} onReceived={() => setSelectedId(null)} />
           ) : (
             <ReceivedDeliverySummary delivery={delivery} />
           )
@@ -185,7 +162,7 @@ export function DeliveriesPage() {
   );
 }
 
-/** Read-only view once a delivery is received, disputed or cancelled. */
+/** Read-only view once a delivery is received or cancelled. */
 function ReceivedDeliverySummary({ delivery }: { delivery: Delivery }) {
   return (
     <div className="space-y-5">
