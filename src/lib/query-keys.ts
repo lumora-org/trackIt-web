@@ -82,6 +82,13 @@ export const queryKeys = {
   dailyReports: {
     list: (filters?: QueryFilters) => ['daily-reports', 'list', filters ?? {}] as const,
     detail: (id: string) => ['daily-reports', 'detail', id] as const,
+    /** Admin sales roll-up — GET /daily-reports/summary. */
+    summary: (filters?: QueryFilters) => ['daily-reports', 'summary', filters ?? {}] as const,
+  },
+
+  incidents: {
+    list: (filters?: QueryFilters) => ['incident-reports', 'list', filters ?? {}] as const,
+    detail: (id: string) => ['incident-reports', 'detail', id] as const,
   },
 
   notifications: {
@@ -123,6 +130,7 @@ export function invalidateForResource(resource: keyof typeof queryKeys): Array<r
         queryKeys.dashboard.admin(),
         queryKeys.dashboard.manager,
         queryKeys.dailyReports.list(),
+        queryKeys.dailyReports.summary(),
       ];
     case 'deliveries':
       return [
@@ -147,7 +155,14 @@ export function invalidateForResource(resource: keyof typeof queryKeys): Array<r
     case 'dailyReports':
       return [
         queryKeys.dailyReports.list(),
+        queryKeys.dailyReports.summary(),
         queryKeys.dashboard.manager,
+        queryKeys.dashboard.admin(),
+      ];
+    case 'incidents':
+      return [
+        queryKeys.incidents.list(),
+        queryKeys.dailyReports.summary(),
         queryKeys.dashboard.admin(),
       ];
     case 'notifications':

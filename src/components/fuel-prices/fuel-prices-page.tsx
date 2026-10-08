@@ -11,7 +11,6 @@ import {
   applicablePrice,
   createFuelPrice,
   createFuelPriceSchema,
-  isScheduled,
   listFuelPrices,
   type CreateFuelPriceInput,
 } from '@/api/fuel-prices.api';
@@ -23,7 +22,7 @@ import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Input, Select } from '@/components/ui/input';
 import { EmptyState, ErrorState, InlineError, Skeleton } from '@/components/ui/states';
-import { formatDate, todayIsoDate } from '@/lib/format';
+import { formatDate } from '@/lib/format';
 import { can } from '@/lib/permissions';
 import { queryKeys } from '@/lib/query-keys';
 import type { FuelType } from '@/types/domain';
@@ -32,8 +31,10 @@ import { useAuth } from '@/providers/auth-provider';
 /**
  * Fuel pricing (PROMPT.md §31 step 8, §13).
  *
- * Prices are historical and effective-dated, so this screen is built around the
- * three states a price can be in: current, scheduled (future), and historical.
+ * Admins set a price here and it takes effect immediately (product decision
+ * 2026-10 — no scheduling); managers get the same screen read-only so they can
+ * always see what the pumps sell at — the 30 s refresh picks up an admin's
+ * change without a manual reload.
  *
  * The backend is authoritative for pricing (doc 08 §33). Nothing here computes a
  * sale price — it only displays intervals the API returned.
@@ -57,17 +58,24 @@ export function FuelPricesPage() {
     queryKey: queryKeys.fuelPrices.list({ fuelTypeId: activeFuelId }),
     queryFn: () => listFuelPrices({ fuelTypeId: activeFuelId ?? undefined, limit: 100 }),
     enabled: Boolean(activeFuelId),
+    // Same cadence as the notification bell: a manager's open view reflects
+    // an admin's price change shortly after it lands.
+    refetchInterval: 30_000,
   });
 
   const prices = useMemo(() => pricesQuery.data?.data ?? [], [pricesQuery.data]);
   const current = useMemo(() => applicablePrice(prices), [prices]);
-  const scheduled = useMemo(() => prices.filter((p) => isScheduled(p)), [prices]);
+  // Everything not in force right now, newest first. Future-dated rows cannot
+  // be created anymore; a legacy one is simply not shown. "Now" is the list's
+  // own fetch time so the render stays pure.
   const history = useMemo(
     () =>
       prices
-        .filter((p) => !isScheduled(p) && p.id !== current?.id)
+        .filter(
+          (p) => p.id !== current?.id && +new Date(p.effectiveFrom) <= pricesQuery.dataUpdatedAt,
+        )
         .sort((a, b) => +new Date(b.effectiveFrom) - +new Date(a.effectiveFrom)),
-    [prices, current],
+    [prices, current, pricesQuery.dataUpdatedAt],
   );
 
   if (fuelTypesQuery.isLoading) {
@@ -95,7 +103,8 @@ export function FuelPricesPage() {
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Fuel Prices</h1>
           <p className="text-sm text-neutral-500">
-            Prices are effective-dated. A change never rewrites past sales.
+            A new price applies immediately at every branch. Sales already recorded keep their
+            original price.
           </p>
         </div>
         {canManage ? (
@@ -155,27 +164,6 @@ export function FuelPricesPage() {
               )}
             </CardBody>
           </Card>
-
-          {/*
-            PROMPT.md §13 — warn users about scheduled/future pricing so nobody
-            is surprised when tomorrow's sales are priced differently.
-          */}
-          {scheduled.length > 0 ? (
-            <div
-              role="status"
-              className="rounded-card border-info-500/30 bg-info-50 border px-4 py-3"
-            >
-              <p className="text-info-700 text-sm font-semibold">Scheduled price change</p>
-              <ul className="mt-1 space-y-1">
-                {scheduled.map((price) => (
-                  <li key={price.id} className="text-info-700 text-sm">
-                    <PricePerLitreDisplay value={price.pricePerLitre} /> takes effect{' '}
-                    {formatDate(price.effectiveFrom)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
 
           <Card>
             <CardHeader>
@@ -256,7 +244,6 @@ function SetPriceDialog({
   const {
     register,
     handleSubmit,
-    watch,
     setError,
     reset,
     formState: { errors },
@@ -265,12 +252,8 @@ function SetPriceDialog({
     defaultValues: {
       fuelTypeId: defaultFuelTypeId ?? '',
       pricePerLitre: currentPrice ?? undefined,
-      effectiveFrom: todayIsoDate(),
     },
   });
-
-  const effectiveFrom = watch('effectiveFrom');
-  const isFuture = effectiveFrom ? effectiveFrom > todayIsoDate() : false;
 
   const mutation = useMutation({
     mutationFn: createFuelPrice,
@@ -284,7 +267,8 @@ function SetPriceDialog({
       if (isApiError(err)) {
         const priceError = err.fieldError('pricePerLitre');
         if (priceError) setError('pricePerLitre', { message: priceError });
-        // doc 04 §9 — INVALID_FUEL_PRICE means the period overlaps an existing one.
+        // doc 04 §9 — INVALID_FUEL_PRICE: surface the API's message (a rare
+        // same-instant retry only — overlaps cannot be requested anymore).
         setFormError(priceError ? null : err.message);
       } else {
         setFormError('Something went wrong. Please try again.');
@@ -297,7 +281,7 @@ function SetPriceDialog({
       open={open}
       onClose={onClose}
       title="Set fuel price"
-      description="This takes effect from the date you choose. Sales before then keep their original price."
+      description="Applies immediately at every branch. Sales already recorded keep their original price."
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
@@ -330,31 +314,12 @@ function SetPriceDialog({
           inputMode="decimal"
           step="0.01"
           min="0.01"
-          placeholder="1500.00"
+          placeholder="1600.00"
           description="Must be greater than zero."
           error={errors.pricePerLitre?.message}
           disabled={mutation.isPending}
           {...register('pricePerLitre', { valueAsNumber: true })}
         />
-
-        <Input
-          label="Effective from"
-          type="date"
-          min={todayIsoDate()}
-          error={errors.effectiveFrom?.message}
-          disabled={mutation.isPending}
-          {...register('effectiveFrom')}
-        />
-
-        {/*
-          doc 08 §26 / §51 — a future price schedules a change. The backend rejects
-          an ambiguous overlap, so warn before the user hits save.
-        */}
-        {isFuture ? (
-          <p className="bg-warning-50 text-warning-700 rounded-xl px-3 py-2.5 text-sm">
-            This schedules a price change for {effectiveFrom}. Today&rsquo;s price is unaffected.
-          </p>
-        ) : null}
       </div>
     </Dialog>
   );

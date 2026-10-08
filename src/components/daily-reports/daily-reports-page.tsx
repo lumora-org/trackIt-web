@@ -2,37 +2,27 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ClipboardCheck,
-  Plus,
-  RotateCcw,
-  Send,
-  XCircle,
-} from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, Plus, ShieldCheck } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 
+import { getSalesSummary, type SalesSummaryFilters } from '@/api/daily-reports.api';
 import { isApiError } from '@/api/errors';
 import {
-  approveDailyReport,
-  createDailyReport,
-  createDailyReportSchema,
-  getDailyReport,
-  listDailyReports,
-  reconcileReport,
-  rejectDailyReport,
-  REPORT_STATUS_FILTERS,
-  resubmitDailyReport,
-  submitDailyReport,
-  type CreateDailyReportValues,
-  type DailyReportFilters,
-} from '@/api/daily-reports.api';
+  createIncidentReport,
+  createIncidentReportSchema,
+  getIncidentReport,
+  INCIDENT_STATUS_FILTERS,
+  listIncidentReports,
+  reviewIncidentReport,
+  type CreateIncidentReportValues,
+  type IncidentReportFilters,
+} from '@/api/incidents.api';
+import { listSales } from '@/api/sales.api';
 import { CurrencyDisplay, QuantityDisplay } from '@/components/ui/amount';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import type { Column } from '@/components/ui/data-table';
 import { DataTable } from '@/components/ui/data-table';
 import { Dialog, Drawer } from '@/components/ui/dialog';
@@ -40,83 +30,90 @@ import { Input, Textarea } from '@/components/ui/input';
 import { FilterSelect } from '@/components/shared/search-input';
 import { DetailRow, SectionHeading } from '@/components/ui/stat-card';
 import { ErrorState, InlineError, LoadingState } from '@/components/ui/states';
-import { formatReportDate, todayIsoDate } from '@/lib/format';
+import { formatCount, formatDateTime, formatReportDate, todayIsoDate } from '@/lib/format';
 import { can } from '@/lib/permissions';
 import { invalidateForResource, queryKeys } from '@/lib/query-keys';
-import { DAILY_REPORT_TRANSITIONS, type DailyReport } from '@/types/domain';
+import type { DailySalesSummaryRow, IncidentReport } from '@/types/domain';
 import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
 
 /**
- * Daily reports (PROMPT.md §31 step 15, §14).
+ * Daily reports (product decision, 2026-10).
  *
- * A manager's daily report is deliberately simple: the backend calculates every
- * figure, the manager adds optional notes and submits. An administrator reviews.
+ * The screen means one job per role, so the two can no longer be confused:
  *
- * doc 03 §56 — a report is unique per (branch, date), so a rejected report is
- * resubmitted rather than recreated.
+ *  - A MANAGER keeps the incident log — exceptions only: stock variances,
+ *    government vehicles collecting fuel without paying, equipment failures.
+ *    Money is not entered here; the day's sales are the totals on the
+ *    Record Sale screen.
+ *  - An ADMIN reads the roll-up — the destination for every manager sale
+ *    record. One row per (branch, business day) with the day's litres,
+ *    revenue, its per-fuel split, the individual records and the branch's
+ *    incidents; open incidents are reviewed from here.
  */
 export function DailyReportsPage() {
   const { user } = useAuth();
-  const { activeBranchIds } = useBranchContext();
-  const canSubmit = can(user?.role, 'dailyReport.submit');
-  const canReview = can(user?.role, 'dailyReport.review');
 
-  const branchId = activeBranchIds.length === 1 ? activeBranchIds[0] : undefined;
+  // The route and nav entry are shared, but a manager logs incidents while an
+  // administrator consumes the roll-up of what managers recorded.
+  if (user?.role === 'MANAGER') return <ManagerIncidentsView />;
+  return <AdminRollupView />;
+}
+
+/* ------------------------------------------------- manager: incident log */
+
+function ManagerIncidentsView() {
+  const { user } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const canReport = can(user?.role, 'dailyReport.submit');
 
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // A notification deep-links straight to one incident (?incident=<id>).
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('incident'));
 
-  const filters: DailyReportFilters = {
+  const filters: IncidentReportFilters = {
     page,
     limit: 20,
-    branchId,
-    status: (statusFilter || undefined) as DailyReportFilters['status'],
+    status: (statusFilter || undefined) as IncidentReportFilters['status'],
   };
 
   const listQuery = useQuery({
-    queryKey: queryKeys.dailyReports.list(filters),
-    queryFn: () => listDailyReports(filters),
+    queryKey: queryKeys.incidents.list(filters),
+    queryFn: () => listIncidentReports(filters),
   });
 
-  const columns: Column<DailyReport>[] = [
+  function closeDetail() {
+    setSelectedId(null);
+    // Drop the deep link so a refresh does not reopen the drawer.
+    if (searchParams.get('incident')) router.replace('/daily-reports');
+  }
+
+  const columns: Column<IncidentReport>[] = [
     {
-      key: 'reportDate',
+      key: 'incidentDate',
       header: 'Date',
       primary: true,
-      render: (r) => <span className="font-medium">{formatReportDate(r.reportDate)}</span>,
+      render: (r) => <span className="font-medium">{formatReportDate(r.incidentDate)}</span>,
     },
-    {
-      key: 'totalSoldLitres',
-      header: 'Fuel sold',
-      align: 'right',
-      secondary: true,
-      render: (r) => <QuantityDisplay value={r.totalSoldLitres} />,
-    },
-    {
-      key: 'totalReceivedLitres',
-      header: 'Received',
-      align: 'right',
-      render: (r) => <QuantityDisplay value={r.totalReceivedLitres} />,
-    },
-    {
-      key: 'closingStockLitres',
-      header: 'Closing',
-      align: 'right',
-      render: (r) => <QuantityDisplay value={r.closingStockLitres} />,
-    },
-    {
-      key: 'totalRevenue',
-      header: 'Revenue',
-      align: 'right',
-      render: (r) => <CurrencyDisplay value={r.totalRevenue} />,
-    },
+    { key: 'title', header: 'Incident', secondary: true, render: (r) => r.title },
     {
       key: 'status',
       header: 'Status',
-      render: (r) => <StatusBadge domain="dailyReport" value={r.status} />,
+      render: (r) => <StatusBadge domain="incident" value={r.status} />,
+    },
+    {
+      key: 'reviewedBy',
+      header: 'Reviewed by',
+      mobileHidden: true,
+      render: (r) =>
+        r.status === 'REVIEWED' ? (
+          <span className="text-sm text-neutral-600">{r.reviewedByName ?? 'Administrator'}</span>
+        ) : (
+          <span className="text-sm text-neutral-400">Awaiting review</span>
+        ),
     },
   ];
 
@@ -124,17 +121,17 @@ export function DailyReportsPage() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-neutral-900">Daily Reports</h1>
+          <h1 className="text-xl font-bold text-neutral-900">Incident Reports</h1>
           <p className="text-sm text-neutral-500">
-            {canReview
-              ? 'Review the daily reports submitted by your branch managers.'
-              : 'Submit a daily summary for your branch. All figures are calculated for you.'}
+            Log what happened at the branch — stock variances, government vehicles collecting fuel
+            without paying, equipment failures. The day&rsquo;s sales are recorded from the Record
+            Sale screen, not here.
           </p>
         </div>
-        {canSubmit ? (
+        {canReport ? (
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="size-4" aria-hidden="true" />
-            New daily report
+            Report an incident
           </Button>
         ) : null}
       </header>
@@ -148,47 +145,43 @@ export function DailyReportsPage() {
             setStatusFilter(value);
             setPage(1);
           }}
-          options={REPORT_STATUS_FILTERS}
+          options={INCIDENT_STATUS_FILTERS}
         />
       </div>
 
       <DataTable
-        caption="Daily reports"
+        caption="Incident reports"
         columns={columns}
         data={listQuery.data?.data ?? []}
         rowKey={(r) => r.id}
         loading={listQuery.isLoading}
-        loadingLabel="Loading daily reports"
+        loadingLabel="Loading incident reports"
         error={listQuery.error?.message ?? null}
         onRetry={() => listQuery.refetch()}
         meta={listQuery.data?.meta ?? null}
         onPageChange={setPage}
         onRowClick={(row) => setSelectedId(row.id)}
-        emptyTitle="No daily reports yet"
-        emptyDescription={
-          canSubmit
-            ? 'Create a daily report to summarise your branch activity for a day.'
-            : 'No reports have been submitted for this branch yet.'
-        }
-        emptyIcon={ClipboardCheck}
+        emptyTitle="No incidents reported"
+        emptyDescription="Anything unusual — unpaid fuel, stock variances, faulty equipment — can be logged here for the administrators to review."
+        emptyIcon={AlertTriangle}
         emptyAction={
-          canSubmit ? { label: 'New daily report', onClick: () => setCreateOpen(true) } : undefined
+          canReport
+            ? { label: 'Report an incident', onClick: () => setCreateOpen(true) }
+            : undefined
         }
       />
 
-      <CreateDailyReportDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-      <DailyReportDetailDrawer
-        reportId={selectedId}
+      <ReportIncidentDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <IncidentDetailDrawer
+        incidentId={selectedId}
         open={Boolean(selectedId)}
-        onClose={() => setSelectedId(null)}
+        onClose={closeDetail}
       />
     </div>
   );
 }
 
-/* -------------------------------------------------------------- create */
-
-function CreateDailyReportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function ReportIncidentDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { activeBranchIds } = useBranchContext();
   const branchId = activeBranchIds[0];
@@ -198,52 +191,54 @@ function CreateDailyReportDialog({ open, onClose }: { open: boolean; onClose: ()
     register,
     handleSubmit,
     reset,
-    setError,
     formState: { errors },
-  } = useForm<CreateDailyReportValues>({
-    resolver: zodResolver(createDailyReportSchema),
-    defaultValues: { reportDate: todayIsoDate(), managerNotes: '' },
+  } = useForm<CreateIncidentReportValues>({
+    resolver: zodResolver(createIncidentReportSchema),
+    defaultValues: { incidentDate: todayIsoDate(), title: '', description: '' },
   });
 
   const mutation = useMutation({
-    mutationFn: (values: CreateDailyReportValues) =>
-      createDailyReport({ ...values, branchId: branchId! }),
+    mutationFn: (values: CreateIncidentReportValues) =>
+      createIncidentReport({
+        branchId: branchId!,
+        incidentDate: values.incidentDate || todayIsoDate(),
+        title: values.title,
+        description: values.description,
+      }),
     onSuccess: () => {
-      for (const key of invalidateForResource('dailyReports')) {
+      for (const key of invalidateForResource('incidents')) {
         void queryClient.invalidateQueries({ queryKey: key });
       }
-      onClose();
+      closeDialog();
       reset();
     },
     onError: (err) => {
-      if (isApiError(err)) {
-        // doc 03 §56 — a duplicate (branch, date) surfaces as 409.
-        const dateError = err.fieldError('reportDate');
-        if (dateError) setError('reportDate', { message: dateError });
-        setFormError(dateError ? null : err.message);
-      } else {
-        setFormError('Something went wrong. Please try again.');
-      }
+      setFormError(isApiError(err) ? err.message : 'Something went wrong. Please try again.');
     },
   });
+
+  function closeDialog() {
+    setFormError(null);
+    onClose();
+  }
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
-      title="New daily report"
-      description="Opening stock, fuel received, fuel sold, closing stock and revenue are calculated by the server."
+      onClose={closeDialog}
+      title="Report an incident"
+      description="Administrators are notified and will mark it reviewed once it has been handled."
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
+          <Button variant="outline" onClick={closeDialog} disabled={mutation.isPending}>
             Cancel
           </Button>
           <Button
             onClick={handleSubmit((v) => mutation.mutate(v))}
             loading={mutation.isPending}
-            loadingText="Creating"
+            loadingText="Filing"
           >
-            Create report
+            File report
           </Button>
         </>
       }
@@ -252,271 +247,452 @@ function CreateDailyReportDialog({ open, onClose }: { open: boolean; onClose: ()
         {formError ? <InlineError message={formError} /> : null}
 
         <Input
-          label="Report date"
+          label="Date"
           type="date"
           max={todayIsoDate()}
-          error={errors.reportDate?.message}
+          error={errors.incidentDate?.message}
           disabled={mutation.isPending}
-          {...register('reportDate')}
+          {...register('incidentDate')}
+        />
+
+        <Input
+          label="Title"
+          placeholder="Government vehicle left without paying"
+          error={errors.title?.message}
+          disabled={mutation.isPending}
+          {...register('title')}
         />
 
         <Textarea
-          label="Notes"
-          placeholder="Normal business operations."
-          description="Optional context for the administrator reviewing this report."
-          error={errors.managerNotes?.message}
+          label="What happened?"
+          placeholder="e.g. Two vans from the state ministry filled 180 litres this morning and left without a receipt."
+          description="Fuel type, litres and any vehicle or driver details you have."
+          error={errors.description?.message}
           disabled={mutation.isPending}
-          {...register('managerNotes')}
+          {...register('description')}
         />
 
         <p className="rounded-xl bg-neutral-100 px-3 py-2.5 text-xs text-neutral-600">
-          The report is created as a draft. You can review the figures before submitting.
+          This log is for exceptions — it does not record sales. Record the day&rsquo;s totals from
+          the Record Sale screen.
         </p>
       </div>
     </Dialog>
   );
 }
 
-/* -------------------------------------------------------------- detail */
+/* ------------------------------------------- admin: sales roll-up */
 
-function DailyReportDetailDrawer({
-  reportId,
+/** `YYYY-MM-DD` for N days before today — mirrors the endpoint's default window. */
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+function AdminRollupView() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { activeBranchIds, activeBusinessId } = useBranchContext();
+
+  const [page, setPage] = useState(1);
+  // The endpoint defaults to 30 days; keep the inputs honest about that.
+  const [from, setFrom] = useState(isoDaysAgo(29));
+  const [to, setTo] = useState(todayIsoDate());
+  const [selectedDay, setSelectedDay] = useState<DailySalesSummaryRow | null>(null);
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
+    searchParams.get('incident'),
+  );
+
+  // The header's branch switcher narrows the roll-up; "all branches" keeps it open.
+  const branchId = activeBranchIds.length === 1 ? activeBranchIds[0] : undefined;
+
+  const filters: SalesSummaryFilters = {
+    page,
+    limit: 30,
+    branchId,
+    businessId: activeBusinessId ?? undefined,
+    from,
+    to,
+  };
+
+  const summaryQuery = useQuery({
+    queryKey: queryKeys.dailyReports.summary(filters),
+    queryFn: () => getSalesSummary(filters),
+  });
+
+  function closeIncident() {
+    setSelectedIncidentId(null);
+    if (searchParams.get('incident')) router.replace('/daily-reports');
+  }
+
+  const columns: Column<DailySalesSummaryRow>[] = [
+    {
+      key: 'date',
+      header: 'Date',
+      primary: true,
+      render: (r) => <span className="font-medium">{formatReportDate(r.date)}</span>,
+    },
+    {
+      key: 'branch',
+      header: 'Branch',
+      secondary: true,
+      render: (r) => r.branchName ?? r.branchId,
+    },
+    {
+      key: 'totalLitres',
+      header: 'Fuel sold',
+      align: 'right',
+      render: (r) => <QuantityDisplay value={r.totalLitres} />,
+    },
+    {
+      key: 'totalRevenue',
+      header: 'Revenue',
+      align: 'right',
+      render: (r) => <CurrencyDisplay value={r.totalRevenue} />,
+    },
+    {
+      key: 'saleCount',
+      header: 'Records',
+      align: 'right',
+      mobileHidden: true,
+      render: (r) => formatCount(r.saleCount),
+    },
+    {
+      key: 'incidents',
+      header: 'Incidents',
+      render: (r) =>
+        r.incidentCount > 0 ? (
+          <Badge tone={r.openIncidentCount > 0 ? 'warning' : 'neutral'}>
+            {r.incidentCount}
+            {r.openIncidentCount > 0 ? ` · ${r.openIncidentCount} open` : ''}
+          </Badge>
+        ) : (
+          <span className="text-sm text-neutral-400">None</span>
+        ),
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <header>
+        <h1 className="text-xl font-bold text-neutral-900">Daily Reports</h1>
+        <p className="text-sm text-neutral-500">
+          The destination for every sale record from branch managers — one row per branch per day,
+          with its revenue, sale records and incidents.
+        </p>
+      </header>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="sm:w-44">
+          <Input
+            label="From"
+            type="date"
+            value={from}
+            max={to}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div className="sm:w-44">
+          <Input
+            label="To"
+            type="date"
+            value={to}
+            min={from}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+      </div>
+
+      <DataTable
+        caption="Daily sales roll-up"
+        columns={columns}
+        data={summaryQuery.data?.data ?? []}
+        rowKey={(r) => `${r.branchId}:${r.date}`}
+        loading={summaryQuery.isLoading}
+        loadingLabel="Loading daily sales"
+        error={summaryQuery.error?.message ?? null}
+        onRetry={() => summaryQuery.refetch()}
+        meta={summaryQuery.data?.meta ?? null}
+        onPageChange={setPage}
+        onRowClick={(row) => setSelectedDay(row)}
+        emptyTitle="No sale records in this window"
+        emptyDescription="When managers record a day's totals on the Record Sale screen, each branch-day appears here."
+        emptyIcon={ClipboardCheck}
+      />
+
+      <BranchDayDrawer
+        row={selectedDay}
+        onClose={() => setSelectedDay(null)}
+        onOpenIncident={(id) => {
+          setSelectedDay(null);
+          setSelectedIncidentId(id);
+        }}
+      />
+      <IncidentDetailDrawer
+        incidentId={selectedIncidentId}
+        open={Boolean(selectedIncidentId)}
+        onClose={closeIncident}
+      />
+    </div>
+  );
+}
+
+/**
+ * The drill-down behind one roll-up row: the day's per-fuel split, every
+ * record that built it and the branch's incidents for that day.
+ */
+function BranchDayDrawer({
+  row,
+  onClose,
+  onOpenIncident,
+}: {
+  row: DailySalesSummaryRow | null;
+  onClose: () => void;
+  onOpenIncident: (incidentId: string) => void;
+}) {
+  const branchId = row?.branchId ?? '';
+  const date = row?.date ?? '';
+
+  const salesQuery = useQuery({
+    queryKey: queryKeys.sales.list({ branchId, from: date, to: date, limit: 50 }),
+    queryFn: () => listSales({ branchId, from: date, to: date, limit: 50 }),
+    enabled: Boolean(row),
+  });
+
+  const incidentsQuery = useQuery({
+    queryKey: queryKeys.incidents.list({ branchId, from: date, to: date, limit: 50 }),
+    queryFn: () => listIncidentReports({ branchId, from: date, to: date, limit: 50 }),
+    enabled: Boolean(row),
+  });
+
+  // Voided rows are excluded from the roll-up, so they are excluded here too.
+  const sales = (salesQuery.data?.data ?? []).filter((sale) => !sale.voidedAt);
+  const incidents = incidentsQuery.data?.data ?? [];
+
+  return (
+    <Drawer
+      open={Boolean(row)}
+      onClose={onClose}
+      title={row ? `${row.branchName ?? 'Branch'} · ${formatReportDate(row.date)}` : 'Branch day'}
+    >
+      {row ? (
+        <div className="space-y-6">
+          <section>
+            <SectionHeading title="Day totals" />
+            <dl>
+              <DetailRow
+                label="Fuel sold"
+                value={<QuantityDisplay value={row.totalLitres} />}
+                emphasis
+              />
+              <DetailRow
+                label="Revenue"
+                value={<CurrencyDisplay value={row.totalRevenue} />}
+                emphasis
+              />
+              <DetailRow label="Sale records" value={formatCount(row.saleCount)} />
+            </dl>
+          </section>
+
+          {row.fuels.length > 0 ? (
+            <section>
+              <SectionHeading title="By fuel" />
+              <dl>
+                {row.fuels.map((fuel) => (
+                  <DetailRow
+                    key={fuel.fuelTypeId}
+                    label={fuel.fuelTypeName ?? 'Fuel'}
+                    value={
+                      <span className="inline-flex items-baseline gap-2">
+                        <QuantityDisplay value={fuel.litresSold} />
+                        <CurrencyDisplay value={fuel.revenue} />
+                      </span>
+                    }
+                  />
+                ))}
+              </dl>
+            </section>
+          ) : null}
+
+          <section>
+            <SectionHeading title="Sale records" />
+            {salesQuery.isLoading ? (
+              <LoadingState label="Loading records" />
+            ) : salesQuery.isError ? (
+              <ErrorState message={salesQuery.error.message} onRetry={() => salesQuery.refetch()} />
+            ) : sales.length === 0 ? (
+              <p className="text-sm text-neutral-500">No active records for this day.</p>
+            ) : (
+              <ul className="space-y-2">
+                {sales.map((sale) => (
+                  <li
+                    key={sale.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-neutral-50 px-3 py-2.5"
+                  >
+                    <span>
+                      <span className="block font-mono text-xs text-neutral-500">
+                        {sale.saleNumber}
+                      </span>
+                      <span className="block text-sm text-neutral-800">
+                        <QuantityDisplay value={sale.litresSold} /> ·{' '}
+                        <CurrencyDisplay value={sale.totalAmount} />
+                      </span>
+                    </span>
+                    <StatusBadge domain="saleRecordMode" value={sale.recordMode ?? 'SINGLE'} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <SectionHeading title="Incidents" />
+            {incidentsQuery.isLoading ? (
+              <LoadingState label="Loading incidents" />
+            ) : incidents.length === 0 ? (
+              <p className="text-sm text-neutral-500">No incidents reported for this day.</p>
+            ) : (
+              <ul className="space-y-2">
+                {incidents.map((incident) => (
+                  <li key={incident.id}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenIncident(incident.id)}
+                      className="focus:ring-brand-500 w-full rounded-xl bg-neutral-50 px-3 py-2.5 text-left hover:bg-neutral-100 focus:ring-2 focus:outline-none"
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-neutral-800">
+                          {incident.title}
+                        </span>
+                        <StatusBadge domain="incident" value={incident.status} />
+                      </span>
+                      <span className="mt-0.5 block text-xs text-neutral-500">
+                        Reported by {incident.reportedByName ?? '—'}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      ) : null}
+    </Drawer>
+  );
+}
+
+/* ---------------------------------------------- shared: incident detail */
+
+function IncidentDetailDrawer({
+  incidentId,
   open,
   onClose,
 }: {
-  reportId: string | null;
+  incidentId: string | null;
   open: boolean;
   onClose: () => void;
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const canSubmit = can(user?.role, 'dailyReport.submit');
+  // The admin report-review capability covers incident acknowledgement too.
   const canReview = can(user?.role, 'dailyReport.review');
-
   const [actionError, setActionError] = useState<string | null>(null);
-  const [rejecting, setRejecting] = useState(false);
-  const [reason, setReason] = useState('');
 
   const detailQuery = useQuery({
-    queryKey: queryKeys.dailyReports.detail(reportId ?? ''),
-    queryFn: () => getDailyReport(reportId!),
-    enabled: open && Boolean(reportId),
+    queryKey: queryKeys.incidents.detail(incidentId ?? ''),
+    queryFn: () => getIncidentReport(incidentId!),
+    enabled: open && Boolean(incidentId),
   });
 
-  const report = detailQuery.data;
-  const reconciliation = report ? reconcileReport(report) : null;
+  const incident = detailQuery.data;
 
-  const transition = useMutation({
-    mutationFn: async (action: 'submit' | 'approve' | 'reject' | 'resubmit') => {
-      if (!report) throw new Error('No report loaded.');
-      switch (action) {
-        case 'submit':
-          return submitDailyReport(report.id);
-        case 'approve':
-          return approveDailyReport(report.id);
-        case 'reject':
-          return rejectDailyReport(report.id, reason.trim());
-        case 'resubmit':
-          return resubmitDailyReport(report.id);
-      }
-    },
+  const review = useMutation({
+    mutationFn: () => reviewIncidentReport(incident!.id),
     onSuccess: () => {
-      for (const key of invalidateForResource('dailyReports')) {
+      for (const key of invalidateForResource('incidents')) {
         void queryClient.invalidateQueries({ queryKey: key });
       }
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.dailyReports.detail(reportId ?? ''),
+        queryKey: queryKeys.incidents.detail(incidentId ?? ''),
       });
       setActionError(null);
-      setRejecting(false);
-      setReason('');
     },
     onError: (err) => {
       setActionError(isApiError(err) ? err.message : 'That action could not be completed.');
     },
   });
 
-  const allowed = report ? DAILY_REPORT_TRANSITIONS[report.status] : [];
-
   return (
     <Drawer
       open={open}
       onClose={() => {
-        setRejecting(false);
-        setReason('');
+        setActionError(null);
         onClose();
       }}
-      title={report ? `Report for ${formatReportDate(report.reportDate)}` : 'Daily report'}
+      title={incident ? incident.title : 'Incident report'}
     >
-      {detailQuery.isLoading ? <LoadingState label="Loading report" /> : null}
+      {detailQuery.isLoading ? <LoadingState label="Loading incident" /> : null}
       {detailQuery.isError ? (
         <ErrorState message={detailQuery.error.message} onRetry={() => detailQuery.refetch()} />
       ) : null}
 
-      {report ? (
+      {incident ? (
         <div className="space-y-6">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge domain="dailyReport" value={report.status} />
-            {report.reviewedAt ? <span className="text-xs text-neutral-500">Reviewed</span> : null}
+            <StatusBadge domain="incident" value={incident.status} />
+            <span className="text-xs text-neutral-500">
+              {formatReportDate(incident.incidentDate)}
+            </span>
           </div>
 
-          {/* doc 04 §66 — every figure below came from the server. */}
           <section>
-            <SectionHeading title="Summary" />
+            <SectionHeading title="What happened" />
+            <p className="rounded-xl bg-neutral-100 px-3 py-2.5 text-sm whitespace-pre-wrap text-neutral-700">
+              {incident.description}
+            </p>
+          </section>
+
+          <section>
+            <SectionHeading title="Record" />
             <dl>
-              <DetailRow
-                label="Opening stock"
-                value={<QuantityDisplay value={report.openingStockLitres} />}
-              />
-              <DetailRow
-                label="Fuel received"
-                value={<QuantityDisplay value={report.totalReceivedLitres} />}
-              />
-              <DetailRow
-                label="Fuel sold"
-                value={<QuantityDisplay value={report.totalSoldLitres} />}
-              />
-              <DetailRow
-                label="Closing stock"
-                value={<QuantityDisplay value={report.closingStockLitres} />}
-                emphasis
-              />
-              <DetailRow
-                label="Revenue"
-                value={<CurrencyDisplay value={report.totalRevenue} />}
-                emphasis
-              />
+              {incident.branchName ? (
+                <DetailRow label="Branch" value={incident.branchName} />
+              ) : null}
+              <DetailRow label="Reported by" value={incident.reportedByName ?? '—'} />
+              <DetailRow label="Reported on" value={formatDateTime(incident.createdAt)} />
+              {incident.reviewedAt ? (
+                <>
+                  <DetailRow label="Reviewed by" value={incident.reviewedByName ?? '—'} />
+                  <DetailRow label="Reviewed on" value={formatDateTime(incident.reviewedAt)} />
+                </>
+              ) : null}
             </dl>
           </section>
 
-          {/*
-            doc 03 §58 — Opening + Received − Sold = Closing. No discrepancy
-            column exists in doc 03, so the check is surfaced in the UI rather
-            than stored (ASSUMPTIONS.md §3.5 family).
-          */}
-          {reconciliation && !reconciliation.balanced ? (
-            <div
-              role="alert"
-              className="rounded-card border-warning-500/30 bg-warning-50 flex items-start gap-3 border px-4 py-3"
-            >
-              <AlertTriangle
-                className="text-warning-700 mt-0.5 size-5 shrink-0"
-                aria-hidden="true"
-              />
-              <p className="text-warning-700 text-sm">
-                The figures do not reconcile: opening + received − sold is{' '}
-                {reconciliation.computedClosing.toLocaleString('en-NG')} L but closing stock is{' '}
-                {report.closingStockLitres.toLocaleString('en-NG')} L. This usually reflects
-                unrecorded adjustments.
-              </p>
-            </div>
-          ) : null}
-
-          {report.managerNotes ? (
-            <section>
-              <SectionHeading title="Manager notes" />
-              <p className="rounded-xl bg-neutral-100 px-3 py-2.5 text-sm text-neutral-700">
-                {report.managerNotes}
-              </p>
-            </section>
-          ) : null}
-
-          {report.rejectionReason ? (
-            <section>
-              <SectionHeading title="Rejection reason" />
-              <p className="border-danger-500/30 bg-danger-50 text-danger-700 rounded-xl border px-3 py-2.5 text-sm">
-                {report.rejectionReason}
-              </p>
-            </section>
-          ) : null}
-
           {actionError ? <InlineError message={actionError} /> : null}
 
-          {/* -------------------------------------------------------- actions */}
-          <section className="space-y-2 border-t border-neutral-200 pt-4">
-            {canSubmit && allowed.includes('SUBMITTED') ? (
+          {canReview && incident.status === 'OPEN' ? (
+            <section className="border-t border-neutral-200 pt-4">
               <Button
                 block
-                loading={transition.isPending}
-                loadingText="Submitting"
-                onClick={() => transition.mutate('submit')}
+                loading={review.isPending}
+                loadingText="Marking reviewed"
+                onClick={() => review.mutate()}
               >
-                <Send className="size-4" aria-hidden="true" />
-                Submit report
+                <ShieldCheck className="size-4" aria-hidden="true" />
+                Mark reviewed
               </Button>
-            ) : null}
-
-            {canSubmit && allowed.includes('DRAFT') && report.status === 'REJECTED' ? (
-              <Button
-                block
-                variant="secondary"
-                loading={transition.isPending}
-                loadingText="Resubmitting"
-                onClick={() => transition.mutate('resubmit')}
-              >
-                <RotateCcw className="size-4" aria-hidden="true" />
-                Resubmit for review
-              </Button>
-            ) : null}
-
-            {canReview && allowed.includes('APPROVED') ? (
-              <Button
-                block
-                loading={transition.isPending}
-                loadingText="Approving"
-                onClick={() => transition.mutate('approve')}
-              >
-                <CheckCircle2 className="size-4" aria-hidden="true" />
-                Approve report
-              </Button>
-            ) : null}
-
-            {canReview && allowed.includes('REJECTED') ? (
-              rejecting ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Reject this report</CardTitle>
-                    <Badge tone="danger">Reason required</Badge>
-                  </CardHeader>
-                  <CardBody className="space-y-3">
-                    <Textarea
-                      label="Rejection reason"
-                      placeholder="Closing stock does not match the physical stock count."
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      disabled={transition.isPending}
-                      required
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => setRejecting(false)}
-                        disabled={transition.isPending}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        variant="danger"
-                        className="flex-1"
-                        disabled={reason.trim().length === 0}
-                        loading={transition.isPending}
-                        loadingText="Rejecting"
-                        onClick={() => transition.mutate('reject')}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  </CardBody>
-                </Card>
-              ) : (
-                <Button variant="outline" block onClick={() => setRejecting(true)}>
-                  <XCircle className="size-4" aria-hidden="true" />
-                  Reject report
-                </Button>
-              )
-            ) : null}
-          </section>
+            </section>
+          ) : null}
         </div>
       ) : null}
     </Drawer>

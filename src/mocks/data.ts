@@ -19,6 +19,7 @@ import type {
   FuelOrder,
   FuelPrice,
   FuelType,
+  IncidentReport,
   InventoryStock,
   InventoryTransaction,
   ManagerDashboard,
@@ -218,14 +219,6 @@ export const FUEL_PRICES: FuelPrice[] = [
     fuelTypeId: FUEL_TYPES[2]!.id,
     pricePerLitre: 1400,
     effectiveFrom: daysAgo(60, 0),
-    effectiveTo: null,
-  },
-  // A scheduled future PMS price — exercises the "future pricing" UI.
-  {
-    id: 'e0000000-0000-4000-8000-000000000007',
-    fuelTypeId: FUEL_TYPES[0]!.id,
-    pricePerLitre: 1650,
-    effectiveFrom: daysAgo(-6, 0),
     effectiveTo: null,
   },
 ];
@@ -673,6 +666,10 @@ export const SALES: Sale[] = [
     litresSold: 8500,
     unitPrice: 1550,
     totalAmount: 13175000,
+    // Confirmed yesterday; the gate backfills history to APPROVED.
+    approvalStatus: 'APPROVED',
+    approvedAt: daysAgo(0, 8),
+    rejectionReason: null,
     soldAt: daysAgo(1, 15),
     voidedAt: null,
     voidReason: null,
@@ -686,6 +683,10 @@ export const SALES: Sale[] = [
     litresSold: 20000,
     unitPrice: 1600,
     totalAmount: 32000000,
+    // The manager's fresh recording: awaiting admin confirmation.
+    approvalStatus: 'PENDING',
+    approvedAt: null,
+    rejectionReason: null,
     soldAt: daysAgo(0, 11),
     voidedAt: null,
     voidReason: null,
@@ -699,6 +700,9 @@ export const SALES: Sale[] = [
     litresSold: 4500,
     unitPrice: 1750,
     totalAmount: 7875000,
+    approvalStatus: 'PENDING',
+    approvedAt: null,
+    rejectionReason: null,
     soldAt: daysAgo(0, 9),
     voidedAt: null,
     voidReason: null,
@@ -712,6 +716,9 @@ export const SALES: Sale[] = [
     litresSold: 2500,
     unitPrice: 1550,
     totalAmount: 3875000,
+    approvalStatus: 'APPROVED',
+    approvedAt: daysAgo(2, 14),
+    rejectionReason: null,
     soldAt: daysAgo(2, 13),
     // Voiding must not delete history — the inventory correction remains.
     voidedAt: daysAgo(1, 10),
@@ -726,6 +733,10 @@ export const SALES: Sale[] = [
     litresSold: 6000,
     unitPrice: 1750,
     totalAmount: 10500000,
+    // Refused with a reason: the manager sees it and revises the figure.
+    approvalStatus: 'REJECTED',
+    approvedAt: null,
+    rejectionReason: 'Figure does not match the pump reading.',
     soldAt: daysAgo(0, 14),
     voidedAt: null,
     voidReason: null,
@@ -791,6 +802,65 @@ export const DAILY_REPORTS: DailyReport[] = [
     reviewedAt: daysAgo(2, 12),
     reviewedBy: USERS[1]!.id,
     rejectionReason: 'Closing stock does not match the physical stock count.',
+  },
+];
+
+/**
+ * Product decision (2026-10) — the manager's free-text exception log. An
+ * incident carries no financial figure; sales live in the day-total flow.
+ */
+export const INCIDENT_REPORTS: IncidentReport[] = [
+  {
+    id: '19000000-0000-4000-8000-000000000001',
+    branchId: BRANCHES[0]!.id,
+    branchName: 'KBY Doka',
+    incidentDate: isoDate(0),
+    title: 'Government vehicle left without paying',
+    description:
+      'A state ministry pickup filled 120 L of AGO at 09:12 and left without a receipt. ' +
+      'The driver promised to settle the balance tomorrow; the plate number is in the ' +
+      'paper log at the counter.',
+    status: 'OPEN',
+    reportedBy: USERS[2]!.id,
+    reportedByName: 'Mohamed Naera',
+    reviewedBy: null,
+    reviewedByName: null,
+    reviewedAt: null,
+    createdAt: daysAgo(0, 10),
+  },
+  {
+    id: '19000000-0000-4000-8000-000000000002',
+    branchId: BRANCHES[0]!.id,
+    branchName: 'KBY Doka',
+    incidentDate: isoDate(2),
+    title: 'PMS dip reading shows a negative variance',
+    description:
+      'The evening dip reading was 380 L below the book stock. No leak was visible; ' +
+      'the tank gauge was recalibrated the same day.',
+    status: 'REVIEWED',
+    reportedBy: USERS[2]!.id,
+    reportedByName: 'Mohamed Naera',
+    reviewedBy: USERS[1]!.id,
+    reviewedByName: 'Kabiru 2-C',
+    reviewedAt: daysAgo(1, 12),
+    createdAt: daysAgo(2, 18),
+  },
+  {
+    id: '19000000-0000-4000-8000-000000000003',
+    branchId: BRANCHES[1]!.id,
+    branchName: 'KBY Kwaga',
+    incidentDate: isoDate(0),
+    title: 'Generator fuel siphoned overnight',
+    description:
+      'The backup generator tank was drained overnight. The padlock on the store was ' +
+      'forced and has been replaced.',
+    status: 'OPEN',
+    reportedBy: USERS[3]!.id,
+    reportedByName: 'Sir Gimi',
+    reviewedBy: null,
+    reviewedByName: null,
+    reviewedAt: null,
+    createdAt: daysAgo(0, 7),
   },
 ];
 
@@ -916,21 +986,33 @@ export const AUDIT_LOGS: AuditLog[] = [
 
 /* -------------------------------------------------------------- dashboards */
 
-export function buildAdminDashboard(): AdminDashboard {
-  const totalRevenue = SALES.reduce((sum, s) => sum + s.totalAmount, 0);
-  const totalSold = SALES.reduce((sum, s) => sum + s.litresSold, 0);
+/**
+ * doc 04 §76 — an optional branchId narrows the overview (summary figures and
+ * the branch list alike) to that one branch, mirroring the real endpoint.
+ */
+export function buildAdminDashboard(branchId?: string | null): AdminDashboard {
+  const scopedBranches = branchId ? BRANCHES.filter((b) => b.id === branchId) : BRANCHES;
+  const scopedSales = branchId ? SALES.filter((s) => s.branchId === branchId) : SALES;
+  const scopedStock = branchId
+    ? INVENTORY_STOCK.filter((s) => s.branchId === branchId)
+    : INVENTORY_STOCK;
+  // Received mirrors the API, which sums DELIVERY rows on the inventory ledger.
+  const received = INVENTORY_TRANSACTIONS.filter(
+    (tx) => tx.transactionType === 'DELIVERY' && (!branchId || tx.branchId === branchId),
+  );
+
   return {
     summary: {
-      totalBranches: BRANCHES.length,
-      totalFuelReceivedLitres: 59850,
-      totalFuelSoldLitres: totalSold,
-      totalRevenue,
+      totalBranches: scopedBranches.length,
+      totalFuelReceivedLitres: received.reduce((sum, tx) => sum + tx.quantityLitres, 0),
+      totalFuelSoldLitres: scopedSales.reduce((sum, s) => sum + s.litresSold, 0),
+      totalRevenue: scopedSales.reduce((sum, s) => sum + s.totalAmount, 0),
       // No reorder threshold exists anywhere in the docs (see ASSUMPTIONS.md),
       // so the mock derives this rather than the API.
-      lowInventoryBranches: INVENTORY_STOCK.filter((s) => s.currentQuantityLitres < 20000).length,
+      lowInventoryBranches: scopedStock.filter((s) => s.currentQuantityLitres < 20000).length,
     },
-    branches: BRANCHES.map((b) => {
-      const rows = SALES.filter((s) => s.branchId === b.id);
+    branches: scopedBranches.map((b) => {
+      const rows = scopedSales.filter((s) => s.branchId === b.id);
       return {
         businessId: b.businessId,
         businessName: BUSINESS.name,
@@ -948,7 +1030,6 @@ export function buildManagerDashboard(branchId: string): ManagerDashboard {
   const rows = SALES.filter((s) => s.branchId === branch.id && !s.voidedAt);
   const today = new Date().toISOString().slice(0, 10);
   const todaysSales = rows.filter((s) => s.soldAt.slice(0, 10) === today);
-  const report = DAILY_REPORTS.find((r) => r.branchId === branch.id);
 
   return {
     branch: { id: branch.id, name: branch.name },
@@ -957,7 +1038,9 @@ export function buildManagerDashboard(branchId: string): ManagerDashboard {
       litresSold: todaysSales.reduce((sum, s) => sum + s.litresSold, 0),
       revenue: todaysSales.reduce((sum, s) => sum + s.totalAmount, 0),
     },
-    dailyReport: report ? { status: report.status } : null,
+    // The manager's obligation is to record the day's sales; the dashboard
+    // nudges while nothing has been booked for the branch today.
+    salesRecordedToday: todaysSales.length > 0,
   };
 }
 
@@ -979,6 +1062,7 @@ const MUTABLE_COLLECTIONS = {
   INVENTORY_TRANSACTIONS,
   SALES,
   DAILY_REPORTS,
+  INCIDENT_REPORTS,
   NOTIFICATIONS,
   AUDIT_LOGS,
   USERS,

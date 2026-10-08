@@ -1,24 +1,31 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ShoppingCart } from 'lucide-react';
+import { CheckCircle2, ShoppingCart, XCircle } from 'lucide-react';
 import { useState } from 'react';
 
 import { isApiError } from '@/api/errors';
 import { listFuelTypes } from '@/api/fuel-types.api';
-import { listSales, voidSale, type SalesFilters } from '@/api/sales.api';
+import {
+  approveSale,
+  listSales,
+  rejectSale,
+  voidSale,
+  type SalesFilters,
+} from '@/api/sales.api';
 import { CurrencyDisplay, QuantityDisplay } from '@/components/ui/amount';
-import { Badge } from '@/components/ui/badge';
+import { Badge, StatusBadge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import type { Column } from '@/components/ui/data-table';
 import { DataTable } from '@/components/ui/data-table';
-import { ConfirmDialog } from '@/components/ui/dialog';
+import { ConfirmDialog, Drawer } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/input';
 import { FilterSelect } from '@/components/shared/search-input';
-import { InlineError, EmptyState } from '@/components/ui/states';
+import { InlineError } from '@/components/ui/states';
 import { formatDateTime, formatLitres } from '@/lib/format';
 import { can } from '@/lib/permissions';
 import { invalidateForResource, queryKeys } from '@/lib/query-keys';
-import { saleStatus, type Sale } from '@/types/domain';
+import { saleStatus, type Sale, type SaleApprovalStatus } from '@/types/domain';
 import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
 
@@ -30,17 +37,23 @@ import { RecordSalePanel } from './record-sale-form';
  * doc 03 §61 — a voided sale keeps its history and generates an inventory
  * correction; it is never deleted. A voided row is therefore shown struck
  * through rather than removed.
+ *
+ * Product decision (2026-10): managers record the day's figures and an admin
+ * confirms each one, so this page is the manager's recording view and the
+ * admin's review queue at once.
  */
 export function SalesPage() {
   const { user } = useAuth();
   const { activeBranchIds } = useBranchContext();
-  const canView = can(user?.role, 'sales.view');
+  const canRecord = can(user?.role, 'sales.record');
   const canVoid = can(user?.role, 'sales.void');
 
   const branchId = activeBranchIds.length === 1 ? activeBranchIds[0] : undefined;
 
   const [page, setPage] = useState(1);
   const [fuelFilter, setFuelFilter] = useState('');
+  const [approvalFilter, setApprovalFilter] = useState<SaleApprovalStatus | ''>('');
+  const [reviewing, setReviewing] = useState<Sale | null>(null);
   const [voiding, setVoiding] = useState<Sale | null>(null);
 
   const filters: SalesFilters = {
@@ -48,6 +61,7 @@ export function SalesPage() {
     limit: 20,
     branchId,
     fuelTypeId: fuelFilter || undefined,
+    approvalStatus: approvalFilter || undefined,
   };
 
   const listQuery = useQuery({
@@ -86,6 +100,12 @@ export function SalesPage() {
       ),
     },
     {
+      key: 'recordMode',
+      header: 'Type',
+      mobileHidden: true,
+      render: (r) => <StatusBadge domain="saleRecordMode" value={r.recordMode ?? 'SINGLE'} />,
+    },
+    {
       key: 'litresSold',
       header: 'Litres',
       align: 'right',
@@ -117,41 +137,28 @@ export function SalesPage() {
       key: 'status',
       header: 'Status',
       render: (r) => {
-        const status = saleStatus(r);
-        return (
-          <Badge tone={status === 'VOIDED' ? 'danger' : 'success'}>
-            {status === 'VOIDED' ? 'Voided' : 'Recorded'}
-          </Badge>
-        );
+        // Voided trumps everything; otherwise the approval gate is the
+        // status that matters (legacy rows without a status read APPROVED).
+        if (saleStatus(r) === 'VOIDED') return <Badge tone="danger">Voided</Badge>;
+        return <StatusBadge domain="saleApproval" value={r.approvalStatus ?? 'APPROVED'} />;
       },
     },
   ];
 
   const sales = listQuery.data?.data ?? [];
 
-  // Product decision: only managers record sales, so the admin view has no
-  // Sales tab. A direct URL still answers with an explanatory empty state
-  // instead of the ledger.
-  if (!canView) {
-    return (
-      <EmptyState
-        title="Sales are recorded by managers"
-        description="Branch managers send the day's total litres sold from their own account, so the Sales page is not part of the admin view."
-        icon={ShoppingCart}
-      />
-    );
-  }
-
   return (
     <div className="space-y-5">
       <header>
         <h1 className="text-xl font-bold text-neutral-900">Sales</h1>
         <p className="text-sm text-neutral-500">
-          Every recorded sale. Prices are snapshotted at the time of sale.
+          {canRecord
+            ? 'The branch&rsquo;s day totals and every record behind them. Prices are snapshotted by the server.'
+            : 'Every figure the branches record. Review what is pending, or void a confirmed sale to reverse it.'}
         </p>
       </header>
 
-      <RecordSalePanel />
+      {canRecord ? <RecordSalePanel /> : null}
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <FilterSelect
@@ -165,6 +172,21 @@ export function SalesPage() {
           options={[
             { value: '', label: 'All fuel types' },
             ...(fuelTypesQuery.data?.data ?? []).map((f) => ({ value: f.id, label: f.code })),
+          ]}
+        />
+        <FilterSelect
+          className="sm:w-44"
+          label="Filter by approval"
+          value={approvalFilter}
+          onChange={(value) => {
+            setApprovalFilter(value as SaleApprovalStatus | '');
+            setPage(1);
+          }}
+          options={[
+            { value: '', label: 'All figures' },
+            { value: 'PENDING', label: 'Pending review' },
+            { value: 'APPROVED', label: 'Approved' },
+            { value: 'REJECTED', label: 'Rejected' },
           ]}
         />
       </div>
@@ -183,17 +205,172 @@ export function SalesPage() {
         emptyTitle="No sales recorded"
         emptyDescription="Sales recorded for this branch will appear here."
         emptyIcon={ShoppingCart}
-        onRowClick={canVoid ? (row) => !row.voidedAt && setVoiding(row) : undefined}
+        onRowClick={(row) => {
+          if (row.voidedAt) return;
+          // A figure that is awaiting review (or was refused) opens the
+          // review sheet — admins act on it, managers read the verdict. A
+          // confirmed figure opens the void dialog for those allowed to void.
+          if ((row.approvalStatus ?? 'APPROVED') !== 'APPROVED') {
+            setReviewing(row);
+          } else if (canVoid) {
+            setVoiding(row);
+          }
+        }}
       />
 
       {canVoid ? (
         <p className="text-xs text-neutral-500">
-          Select a sale to void it. Voiding keeps the record and reverses its inventory movement.
+          Select a pending figure to review it, or a confirmed sale to void it. Voiding keeps the
+          record and reverses its inventory movement.
         </p>
       ) : null}
 
+      <ReviewSaleSheet sale={reviewing} onClose={() => setReviewing(null)} />
       <VoidSaleDialog sale={voiding} onClose={() => setVoiding(null)} />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------- review */
+
+/**
+ * The approval gate's surface (product decision, 2026-10): an admin confirms
+ * or refuses a manager-recorded figure here. Managers open the same sheet
+ * read-only, to see why a figure was refused. Approval never changes the
+ * figures — it is workflow state, so nothing recomputes.
+ */
+function ReviewSaleSheet({ sale, onClose }: { sale: Sale | null; onClose: () => void }) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const canApprove = can(user?.role, 'sales.approve');
+  const [reason, setReason] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const invalidate = () => {
+    const keys = [...invalidateForResource('sales'), ...invalidateForResource('notifications')];
+    for (const key of keys) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+  };
+
+  const approve = useMutation({
+    mutationFn: () => approveSale(sale!.id),
+    onSuccess: () => {
+      invalidate();
+      onClose();
+    },
+    onError: (err) => {
+      setActionError(isApiError(err) ? err.message : 'Unable to approve this sale.');
+    },
+  });
+
+  const reject = useMutation({
+    mutationFn: () => rejectSale(sale!.id, reason.trim()),
+    onSuccess: () => {
+      invalidate();
+      setReason('');
+      onClose();
+    },
+    onError: (err) => {
+      setActionError(isApiError(err) ? err.message : 'Unable to reject this sale.');
+    },
+  });
+
+  if (!sale) return null;
+
+  const approval = sale.approvalStatus ?? 'APPROVED';
+
+  return (
+    <Drawer
+      open
+      onClose={() => {
+        setActionError(null);
+        onClose();
+      }}
+      title={`Review ${sale.saleNumber}`}
+    >
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge domain="saleApproval" value={approval} />
+          <StatusBadge domain="saleRecordMode" value={sale.recordMode ?? 'SINGLE'} />
+          <span className="text-xs text-neutral-500">{formatDateTime(sale.soldAt)}</span>
+        </div>
+
+        <dl className="space-y-1.5 rounded-xl bg-neutral-50 p-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-xs text-neutral-500">Litres</dt>
+            <dd className="text-sm font-medium text-neutral-900">
+              <QuantityDisplay value={sale.litresSold} />
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-xs text-neutral-500">Price per litre</dt>
+            <dd className="text-sm font-medium text-neutral-900">
+              <CurrencyDisplay value={sale.unitPrice} />
+            </dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-xs text-neutral-500">Total</dt>
+            <dd className="text-sm font-medium text-neutral-900">
+              <CurrencyDisplay value={sale.totalAmount} />
+            </dd>
+          </div>
+        </dl>
+
+        {approval === 'REJECTED' && sale.rejectionReason ? (
+          <p className="text-danger-700 rounded-xl bg-danger-50 px-3 py-2.5 text-sm">
+            Rejected: {sale.rejectionReason}
+          </p>
+        ) : null}
+
+        {actionError ? <InlineError message={actionError} /> : null}
+
+        {canApprove && approval !== 'APPROVED' ? (
+          <section className="space-y-3 border-t border-neutral-200 pt-4">
+            <Button
+              block
+              loading={approve.isPending}
+              loadingText="Approving"
+              onClick={() => approve.mutate()}
+            >
+              <CheckCircle2 className="size-4" aria-hidden="true" />
+              {approval === 'REJECTED' ? 'Approve anyway' : 'Approve figure'}
+            </Button>
+
+            {approval === 'PENDING' ? (
+              <div className="space-y-2">
+                <Textarea
+                  label="Reason for rejection"
+                  placeholder="Figure does not match the pump reading"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  disabled={reject.isPending || approve.isPending}
+                  required
+                />
+                <Button
+                  block
+                  variant="danger"
+                  disabled={reason.trim().length < 3}
+                  loading={reject.isPending}
+                  loadingText="Rejecting"
+                  onClick={() => reject.mutate()}
+                >
+                  <XCircle className="size-4" aria-hidden="true" />
+                  Reject figure
+                </Button>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {!canApprove && approval === 'PENDING' ? (
+          <p className="text-xs text-neutral-500">
+            An admin reviews this figure. Revise the total as the day goes on — a revision returns
+            it to the review queue.
+          </p>
+        ) : null}
+      </div>
+    </Drawer>
   );
 }
 

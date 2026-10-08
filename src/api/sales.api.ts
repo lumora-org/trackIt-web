@@ -12,13 +12,23 @@
 import { z } from 'zod';
 
 import { apiClient } from './client';
-import type { PageMeta, Sale, SaleStatus } from '@/types/domain';
+import type {
+  PageMeta,
+  Sale,
+  SaleApprovalStatus,
+  SaleRecordMode,
+  SaleStatus,
+} from '@/types/domain';
 
 export type SalesFilters = {
   page?: number;
   limit?: number;
   branchId?: string;
   fuelTypeId?: string;
+  /** SINGLE = counter transactions; DAY_TOTAL = the manager's day figures. */
+  recordMode?: SaleRecordMode;
+  /** The admin confirmation gate (product decision 2026-10). */
+  approvalStatus?: SaleApprovalStatus;
   from?: string;
   to?: string;
 };
@@ -32,6 +42,8 @@ export async function listSales(
       limit: filters.limit ?? 20,
       branchId: filters.branchId,
       fuelTypeId: filters.fuelTypeId,
+      recordMode: filters.recordMode,
+      approvalStatus: filters.approvalStatus,
       from: filters.from,
       to: filters.to,
     },
@@ -63,6 +75,35 @@ export async function recordSale(input: RecordSaleInput): Promise<Sale> {
   );
 }
 
+export interface RecordDayTotalInput {
+  branchId: string;
+  fuelTypeId: string;
+  /** Running total litres sold for the day; 0 clears the day's record. */
+  totalLitres: number;
+  /** Business-timezone calendar day (YYYY-MM-DD); defaults to today. */
+  date?: string;
+}
+
+/**
+ * Product decision (2026-10) — the manager records the branch's TOTAL sales
+ * for one fuel on one business day and revises it as the day goes on. The
+ * backend books only the difference, so stock stays exact; there is again no
+ * price and no amount on the wire. Returns null when the figure was cleared
+ * (or a zero no-op), because there is no row to show.
+ */
+export async function recordDayTotal(input: RecordDayTotalInput): Promise<Sale | null> {
+  return apiClient.post<Sale | null>(
+    '/sales/day-total',
+    {
+      branchId: input.branchId,
+      fuelTypeId: input.fuelTypeId,
+      totalLitres: input.totalLitres,
+      ...(input.date ? { date: input.date } : {}),
+    },
+    { idempotencyKey: crypto.randomUUID() },
+  );
+}
+
 /** doc 04 §63 — ADMIN, SUPER_ADMIN. Requires a reason. */
 export async function voidSale(id: string, reason: string): Promise<Sale> {
   return apiClient.post<Sale>(
@@ -71,6 +112,33 @@ export async function voidSale(id: string, reason: string): Promise<Sale> {
     {
       idempotencyKey: crypto.randomUUID(),
     },
+  );
+}
+
+/**
+ * Product decision (2026-10) — an admin confirms a manager-recorded figure.
+ * Approval is workflow metadata only: the litres and amount already count in
+ * every aggregate, so nothing recomputes. A REJECTED figure can be approved
+ * as well, reversing a refusal.
+ */
+export async function approveSale(id: string): Promise<Sale> {
+  return apiClient.post<Sale>(
+    `/sales/${id}/approve`,
+    {},
+    { idempotencyKey: crypto.randomUUID() },
+  );
+}
+
+/**
+ * Product decision (2026-10) — refuse a figure that is awaiting review, with a
+ * mandatory reason. The figures stay on the books; the manager is notified
+ * and their revision returns the row to PENDING.
+ */
+export async function rejectSale(id: string, reason: string): Promise<Sale> {
+  return apiClient.post<Sale>(
+    `/sales/${id}/reject`,
+    { reason },
+    { idempotencyKey: crypto.randomUUID() },
   );
 }
 
@@ -84,11 +152,29 @@ export const recordSaleSchema = z.object({
 
 export type RecordSaleValues = z.infer<typeof recordSaleSchema>;
 
+/** Product decision (2026-10) — 0 is valid: it clears the day's record. */
+export const recordDayTotalSchema = z.object({
+  fuelTypeId: z.string().uuid('Select a fuel type'),
+  totalLitres: z
+    .number({ message: 'Enter the total litres sold' })
+    .min(0, 'Total litres cannot be negative')
+    .max(1_000_000, 'Litres looks too high'),
+});
+
+export type RecordDayTotalValues = z.infer<typeof recordDayTotalSchema>;
+
 export const voidSaleSchema = z.object({
   reason: z.string().trim().min(1, 'A reason is required').max(500, 'Reason is too long'),
 });
 
 export type VoidSaleValues = z.infer<typeof voidSaleSchema>;
+
+/** Product decision (2026-10) — a rejection is refused without a reason. */
+export const rejectSaleSchema = z.object({
+  reason: z.string().trim().min(3, 'A reason is required').max(500, 'Reason is too long'),
+});
+
+export type RejectSaleValues = z.infer<typeof rejectSaleSchema>;
 
 /**
  * Display-only estimate for the confirmation preview (PROMPT.md §9).

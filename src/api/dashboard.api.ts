@@ -30,11 +30,22 @@ export function fetchManagerDashboard() {
   return apiClient.get<ManagerDashboard>('/dashboard/manager');
 }
 
-export function useAdminDashboard(enabled: boolean, businessId?: string | null) {
+export function useAdminDashboard(
+  enabled: boolean,
+  businessId?: string | null,
+  branchId?: string | null,
+) {
   return useQuery({
-    queryKey: queryKeys.dashboard.admin({ businessId: businessId ?? null }),
+    queryKey: queryKeys.dashboard.admin({
+      businessId: businessId ?? null,
+      branchId: branchId ?? null,
+    }),
     // Wrapped so TanStack Query's context object is not passed as `filters`.
-    queryFn: () => fetchAdminDashboard({ businessId: businessId ?? undefined }),
+    queryFn: () =>
+      fetchAdminDashboard({
+        businessId: businessId ?? undefined,
+        branchId: branchId ?? undefined,
+      }),
     enabled,
     // doc 05 §117 — a dashboard summary may be cached briefly, but must not be
     // served stale for long.

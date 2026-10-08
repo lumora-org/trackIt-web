@@ -11,7 +11,12 @@
 import { z } from 'zod';
 
 import { apiClient } from './client';
-import type { DailyReport, DailyReportStatus, PageMeta } from '@/types/domain';
+import type {
+  DailyReport,
+  DailyReportStatus,
+  DailySalesSummaryRow,
+  PageMeta,
+} from '@/types/domain';
 
 export type DailyReportFilters = {
   page?: number;
@@ -31,6 +36,38 @@ export async function listDailyReports(
       limit: filters.limit ?? 20,
       branchId: filters.branchId,
       status: filters.status,
+      from: filters.from,
+      to: filters.to,
+    },
+  });
+}
+
+export type SalesSummaryFilters = {
+  page?: number;
+  limit?: number;
+  branchId?: string;
+  /** SUPER_ADMIN only — scope the roll-up to one business. */
+  businessId?: string;
+  /** Bare calendar dates (YYYY-MM-DD); default window is the last 30 days. */
+  from?: string;
+  to?: string;
+};
+
+/**
+ * Product decision (2026-10) — the admin sales roll-up: the destination for
+ * every manager sale record. One row per (business day, branch) with the day
+ * aggregate, the per-fuel split and the branch's incident counts. ADMIN and
+ * SUPER_ADMIN only.
+ */
+export async function getSalesSummary(
+  filters: SalesSummaryFilters = {},
+): Promise<{ data: DailySalesSummaryRow[]; meta: PageMeta | null }> {
+  return apiClient.list<DailySalesSummaryRow>('/daily-reports/summary', {
+    query: {
+      page: filters.page ?? 1,
+      limit: filters.limit ?? 30,
+      branchId: filters.branchId,
+      businessId: filters.businessId,
       from: filters.from,
       to: filters.to,
     },

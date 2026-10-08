@@ -16,6 +16,7 @@ import {
 } from '@/api/fuel-orders.api';
 import { listBranches } from '@/api/branches.api';
 import { listSuppliers } from '@/api/suppliers.api';
+import { listTankers } from '@/api/tankers.api';
 import { CurrencyDisplay } from '@/components/ui/amount';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
@@ -194,6 +195,12 @@ function CreateFuelOrderDialog({ open, onClose }: { open: boolean; onClose: () =
     enabled: open,
   });
 
+  const tankersQuery = useQuery({
+    queryKey: queryKeys.tankers.list({ activeOnly: true }),
+    queryFn: () => listTankers({ limit: 100, status: 'ACTIVE' }),
+    enabled: open,
+  });
+
   const {
     register,
     control,
@@ -208,6 +215,7 @@ function CreateFuelOrderDialog({ open, onClose }: { open: boolean; onClose: () =
       supplierId: '',
       destinationBranchId: '',
       expectedDeliveryAt: '',
+      tankerId: '',
       notes: '',
       items: [{ fuelTypeId: '', expectedQuantityLitres: 0, unitCost: 0 }],
     },
@@ -251,6 +259,13 @@ function CreateFuelOrderDialog({ open, onClose }: { open: boolean; onClose: () =
     label: `${b.name} (${b.code})`,
   }));
 
+  // Product decision (2026-10) — the tanker may be attached now or left to
+  // dispatch when the order goes in transit, so '' is a valid choice.
+  const tankerOptions = (tankersQuery.data?.data ?? []).map((t) => ({
+    value: t.id,
+    label: t.tankerCode ? `${t.registrationNumber} (${t.tankerCode})` : t.registrationNumber,
+  }));
+
   // doc 09 §14 — an estimated procurement value is illustrative only. There is no
   // order-total column anywhere in doc 03, so nothing is stored or displayed as
   // authoritative.
@@ -264,7 +279,7 @@ function CreateFuelOrderDialog({ open, onClose }: { open: boolean; onClose: () =
       open={open}
       onClose={onClose}
       title="New fuel order"
-      description="The order is created as a draft. Submit it when it is ready."
+      description="Creating the order notifies the destination branch's manager and lists it in their Deliveries. The order itself starts as a draft — submit it when it is ready."
       size="lg"
       footer={
         <>
@@ -300,6 +315,16 @@ function CreateFuelOrderDialog({ open, onClose }: { open: boolean; onClose: () =
           error={errors.destinationBranchId?.message}
           disabled={mutation.isPending}
           {...register('destinationBranchId')}
+        />
+
+        <Select
+          label="Tanker (optional)"
+          description="Assign it now if known — otherwise dispatch can set it when the order goes in transit."
+          placeholder="Not assigned yet"
+          options={tankerOptions}
+          error={errors.tankerId?.message}
+          disabled={mutation.isPending}
+          {...register('tankerId')}
         />
 
         <Input

@@ -1,42 +1,36 @@
 'use client';
 
-import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ShoppingCart } from 'lucide-react';
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
 
 import { isApiError } from '@/api/errors';
-import { getCurrentPrice } from '@/api/fuel-prices.api';
 import { listFuelTypes } from '@/api/fuel-types.api';
-import {
-  estimateTotal,
-  recordSale,
-  recordSaleSchema,
-  type RecordSaleValues,
-} from '@/api/sales.api';
-import { getInventoryStock } from '@/api/inventory.api';
+import { listFuelPrices } from '@/api/fuel-prices.api';
+import { estimateTotal, listSales, recordDayTotal } from '@/api/sales.api';
 import { CurrencyDisplay, PricePerLitreDisplay, QuantityDisplay } from '@/components/ui/amount';
+import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { Drawer } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { InlineError, Skeleton } from '@/components/ui/states';
-import { formatLitres } from '@/lib/format';
+import { formatLitres, todayIsoDate } from '@/lib/format';
 import { can } from '@/lib/permissions';
 import { invalidateForResource, queryKeys } from '@/lib/query-keys';
+import type { FuelType, Sale } from '@/types/domain';
 import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
 
 /**
- * Record a sale (PROMPT.md §31 step 14, §9).
+ * Record the day's sales (product decision, 2026-10).
  *
- * The flow is optimised for speed because this is the highest-frequency action a
- * manager performs: pick a fuel, type litres, see the price and the total, confirm.
- *
- * PROMPT.md §9 — the frontend must not allow overriding the backend price, so
- * there is no price input. The current price is fetched for display only and the
- * total is labelled an estimate, because doc 04 §59 leaves both to the backend.
+ * The manager does not log each counter transaction. They enter the branch's
+ * TOTAL litres sold for one fuel on the current business day and revise that
+ * figure as the day goes on. The backend books only the difference between the
+ * previous figure and the new one (POST /sales/day-total), so stock stays
+ * exact without re-posting the whole day. `0` clears the day and returns the
+ * litres to stock.
  */
 export function RecordSalePanel() {
   const { user } = useAuth();
@@ -47,7 +41,21 @@ export function RecordSalePanel() {
   const branchId = activeBranch?.id ?? activeBranchIds[0] ?? '';
 
   const [open, setOpen] = useState(false);
-  const [success, setSuccess] = useState<{ saleNumber: string; litres: number } | null>(null);
+  const today = todayIsoDate();
+
+  // Today's recorded totals, so the panel summarises before the drawer opens.
+  const todayQuery = useQuery({
+    queryKey: queryKeys.sales.list({
+      branchId,
+      recordMode: 'DAY_TOTAL',
+      from: today,
+      to: today,
+    }),
+    queryFn: () =>
+      listSales({ branchId, recordMode: 'DAY_TOTAL', from: today, to: today, limit: 50 }),
+    enabled: canRecord && Boolean(branchId),
+    staleTime: 15_000,
+  });
 
   if (!canRecord) return null;
 
@@ -55,11 +63,14 @@ export function RecordSalePanel() {
     return (
       <Card>
         <CardBody>
-          <p className="text-sm text-neutral-600">Select a branch before recording a sale.</p>
+          <p className="text-sm text-neutral-600">Select a branch before recording sales.</p>
         </CardBody>
       </Card>
     );
   }
+
+  const recorded = (todayQuery.data?.data ?? []).filter((sale) => !sale.voidedAt);
+  const totalLitres = recorded.reduce((sum, sale) => sum + Number(sale.litresSold), 0);
 
   return (
     <>
@@ -68,7 +79,19 @@ export function RecordSalePanel() {
           <div>
             <p className="text-sm text-neutral-500">Quick action</p>
             <p className="text-base font-semibold text-neutral-900">
-              Record a sale at {activeBranch?.name ?? 'this branch'}
+              Record today&rsquo;s sales at {activeBranch?.name ?? 'this branch'}
+            </p>
+            <p className="mt-0.5 text-sm text-neutral-600">
+              {todayQuery.isLoading ? (
+                <Skeleton className="h-4 w-48" />
+              ) : recorded.length > 0 ? (
+                <>
+                  Recorded today: {formatLitres(totalLitres)} across {recorded.length}{' '}
+                  {recorded.length === 1 ? 'fuel' : 'fuels'}. Update the totals as the day goes on.
+                </>
+              ) : (
+                'No sales recorded yet today. Enter the running totals for each fuel.'
+              )}
             </p>
           </div>
           <Button size="lg" onClick={() => setOpen(true)}>
@@ -79,57 +102,18 @@ export function RecordSalePanel() {
       </Card>
 
       {open ? (
-        <Drawer open={open} onClose={() => setOpen(false)} title="Record sale">
-          {success ? (
-            <SaleSuccess
-              saleNumber={success.saleNumber}
-              litres={success.litres}
-              onDone={() => {
-                setSuccess(null);
-                setOpen(false);
-              }}
-            />
-          ) : (
-            <RecordSaleForm
-              branchId={branchId}
-              onSuccess={(sale) => {
-                setSuccess({ saleNumber: sale.saleNumber, litres: sale.litresSold });
-              }}
-            />
-          )}
+        <Drawer open={open} onClose={() => setOpen(false)} title="Record today's sales">
+          <DayTotalsForm branchId={branchId} />
         </Drawer>
       ) : null}
     </>
   );
 }
 
-/* --------------------------------------------------------------- form */
+/* ------------------------------------------------------------ day totals */
 
-function RecordSaleForm({
-  branchId,
-  onSuccess,
-}: {
-  branchId: string;
-  onSuccess: (sale: { saleNumber: string; litresSold: number }) => void;
-}) {
-  const queryClient = useQueryClient();
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const {
-    register,
-    handleSubmit,
-    watch,
-    setValue,
-    setError,
-    reset,
-    formState: { errors },
-  } = useForm<RecordSaleValues>({
-    resolver: zodResolver(recordSaleSchema),
-    defaultValues: { litresSold: 0 },
-  });
-
-  const fuelTypeId = watch('fuelTypeId');
-  const litresSold = watch('litresSold');
+function DayTotalsForm({ branchId }: { branchId: string }) {
+  const today = todayIsoDate();
 
   const fuelTypesQuery = useQuery({
     queryKey: queryKeys.fuelTypes.list({ activeOnly: true }),
@@ -137,201 +121,189 @@ function RecordSaleForm({
     staleTime: 10 * 60_000,
   });
 
-  /*
-   * The price is fetched, never entered. `/fuel-prices/current/:fuelTypeId`
-   * returns exactly the price the backend will resolve for a sale made now
-   * (doc 08 §31), so the preview matches the authoritative figure.
-   */
-  const priceQuery = useQuery({
-    queryKey: queryKeys.fuelPrices.current(fuelTypeId),
-    queryFn: () => getCurrentPrice(fuelTypeId),
-    enabled: Boolean(fuelTypeId),
+  const todayQuery = useQuery({
+    queryKey: queryKeys.sales.list({
+      branchId,
+      recordMode: 'DAY_TOTAL',
+      from: today,
+      to: today,
+    }),
+    queryFn: () =>
+      listSales({ branchId, recordMode: 'DAY_TOTAL', from: today, to: today, limit: 50 }),
   });
 
-  // Used only to warn when the typed quantity exceeds available stock.
-  const stockQuery = useQuery({
-    queryKey: queryKeys.inventory.stock({ branchId }),
-    queryFn: () => getInventoryStock({ branchId }),
-    staleTime: 15_000,
+  // doc 08 §33 — the price in force right now, per fuel, so a mid-day admin
+  // change is visible on the manager's side the moment the drawer opens. No
+  // staleTime: the drawer remounts on every open and refetches.
+  const pricesQuery = useQuery({
+    queryKey: queryKeys.fuelPrices.list({ active: true, limit: 100 }),
+    queryFn: () => listFuelPrices({ active: true, limit: 100 }),
   });
 
-  const price = priceQuery.data?.pricePerLitre ?? null;
-  const selectedStock = stockQuery.data?.find((s) => s.fuelTypeId === fuelTypeId);
-  const insufficient =
-    selectedStock !== undefined && litresSold > selectedStock.currentQuantityLitres;
+  const fuels = fuelTypesQuery.data?.data ?? [];
+  const currentPriceByFuel = new Map(
+    (pricesQuery.data?.data ?? []).map((price) => [price.fuelTypeId, price.pricePerLitre]),
+  );
+  const recordedByFuel = new Map(
+    (todayQuery.data?.data ?? [])
+      .filter((sale) => !sale.voidedAt)
+      .map((sale) => [sale.fuelTypeId, sale]),
+  );
 
-  const mutation = useMutation({
-    mutationFn: () => recordSale({ branchId, fuelTypeId, litresSold }),
-    onSuccess: (sale) => {
-      // A sale decrements inventory and changes revenue, so invalidate broadly.
-      for (const key of invalidateForResource('sales')) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
-      setFormError(null);
-      reset();
-      onSuccess(sale);
-    },
-    onError: (err) => {
-      if (isApiError(err)) {
-        const litresError = err.fieldError('litresSold');
-        if (litresError) setError('litresSold', { message: litresError });
-        setFormError(litresError ? null : err.message);
-      } else {
-        setFormError('Unable to record the sale.');
-      }
-    },
-  });
+  if (fuelTypesQuery.isLoading || todayQuery.isLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-20 w-full" />
+      </div>
+    );
+  }
 
   return (
-    <form onSubmit={handleSubmit(() => mutation.mutate())} className="space-y-5" noValidate>
-      {formError ? <InlineError message={formError} /> : null}
+    <div className="space-y-4">
+      <p className="text-sm text-neutral-600">
+        Enter the total litres sold today for each fuel — revise the figure as the day goes on.
+        The system books only the difference, so stock stays exact.
+      </p>
 
-      {/* Fuel picker — one tap per fuel, which is the main speed win. */}
-      <fieldset className="space-y-2">
-        <legend className="mb-1.5 text-sm font-medium text-neutral-800">
-          Select fuel <span className="text-danger-500">*</span>
-        </legend>
-        <div className="grid grid-cols-3 gap-2">
-          {(fuelTypesQuery.data?.data ?? []).map((fuel) => {
-            const selected = fuel.id === fuelTypeId;
-            return (
-              <button
-                key={fuel.id}
-                type="button"
-                // setValue (not register's onChange) because this button, not an
-                // <input>, owns the field.
-                onClick={() => {
-                  setValue('fuelTypeId', fuel.id, { shouldValidate: false });
-                  setError('fuelTypeId', { message: undefined });
-                }}
-                aria-pressed={selected}
-                className={`min-h-touch focus-visible:outline-brand-600 rounded-xl font-mono text-base font-bold transition-colors focus-visible:outline-2 ${
-                  selected
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-surface text-neutral-800 ring-1 ring-neutral-300 hover:bg-neutral-50'
-                }`}
-              >
-                {fuel.code}
-              </button>
-            );
-          })}
-        </div>
-        <input type="hidden" {...register('fuelTypeId')} />
-        {errors.fuelTypeId?.message ? (
-          <p role="alert" className="text-danger-700 text-xs font-medium">
-            {errors.fuelTypeId.message}
-          </p>
-        ) : null}
-      </fieldset>
-
-      {/* Current price — read-only, because doc 08 §33 forbids client pricing. */}
-      <div className="rounded-card bg-neutral-100 px-4 py-3">
-        <p className="text-xs text-neutral-500">Current price</p>
-        {priceQuery.isLoading ? (
-          <Skeleton className="mt-1.5 h-7 w-28" />
-        ) : priceQuery.isError ? (
-          <p className="text-danger-700 mt-1 text-sm">{priceQuery.error.message}</p>
-        ) : price ? (
-          <PricePerLitreDisplay
-            value={price}
-            className="mt-0.5 block text-xl font-bold text-neutral-900"
+      {fuels.length === 0 ? (
+        <p className="text-sm text-neutral-500">No active fuel types are configured.</p>
+      ) : (
+        fuels.map((fuel) => (
+          <DayTotalRow
+            key={fuel.id}
+            branchId={branchId}
+            fuel={fuel}
+            existing={recordedByFuel.get(fuel.id)}
+            currentPrice={currentPriceByFuel.get(fuel.id) ?? null}
           />
-        ) : (
-          <p className="mt-1 text-sm text-neutral-600">No price configured.</p>
-        )}
-      </div>
-
-      <Input
-        label="Litres sold"
-        type="number"
-        inputMode="numeric"
-        step="0.001"
-        min="0"
-        required
-        placeholder="8500"
-        error={errors.litresSold?.message}
-        disabled={mutation.isPending}
-        className="text-lg font-semibold"
-        {...register('litresSold', { valueAsNumber: true })}
-      />
-
-      {selectedStock ? (
-        <p className="text-xs text-neutral-500">
-          Available: {formatLitres(selectedStock.currentQuantityLitres)}
-        </p>
-      ) : null}
-
-      {/*
-        A client-side warning only. doc 03 §73 states insufficient inventory is a
-        transactional business rule enforced by the backend, so this never
-        substitutes for the server's INSUFFICIENT_INVENTORY rejection.
-      */}
-      {insufficient ? (
-        <p
-          role="alert"
-          className="border-warning-500/30 bg-warning-50 text-warning-700 rounded-xl border px-3 py-2.5 text-sm"
-        >
-          Only {formatLitres(selectedStock.currentQuantityLitres)} available at this branch.
-        </p>
-      ) : null}
-
-      {/* Estimated total, clearly labelled — the backend computes the real one. */}
-      {price && litresSold > 0 ? (
-        <div className="rounded-card border-brand-200 bg-brand-50 border px-4 py-3">
-          <p className="text-brand-700 text-xs">Estimated total</p>
-          <p className="text-brand-900 mt-0.5 text-2xl font-bold tracking-tight">
-            <CurrencyDisplay value={estimateTotal(litresSold, price)} />
-          </p>
-          <p className="text-brand-700 mt-1 text-xs">
-            Final amount is calculated by the server from the price in effect at sale time.
-          </p>
-        </div>
-      ) : null}
-
-      <Button
-        type="submit"
-        size="xl"
-        block
-        loading={mutation.isPending}
-        loadingText="Recording sale"
-      >
-        Record Sale
-      </Button>
-    </form>
+        ))
+      )}
+    </div>
   );
 }
 
-/* ------------------------------------------------------------ success */
-
-function SaleSuccess({
-  saleNumber,
-  litres,
-  onDone,
+function DayTotalRow({
+  branchId,
+  fuel,
+  existing,
+  currentPrice,
 }: {
-  saleNumber: string;
-  litres: number;
-  onDone: () => void;
+  branchId: string;
+  fuel: FuelType;
+  existing: Sale | undefined;
+  currentPrice: number | null;
 }) {
+  const queryClient = useQueryClient();
+  const [value, setValue] = useState(() =>
+    existing ? String(Number(existing.litresSold)) : '',
+  );
+  const [saved, setSaved] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const parsed = value.trim() === '' ? null : Number(value);
+  const valid =
+    parsed !== null && Number.isFinite(parsed) && parsed >= 0 && parsed <= 1_000_000;
+  const recordedLitres = existing ? Number(existing.litresSold) : 0;
+  // An unchanged figure (including 0 on a day with no record) is a no-op.
+  const unchanged = valid && parsed === recordedLitres;
+
+  const mutation = useMutation({
+    mutationFn: () => recordDayTotal({ branchId, fuelTypeId: fuel.id, totalLitres: parsed! }),
+    onSuccess: () => {
+      for (const key of invalidateForResource('sales')) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      setSaved(true);
+      setFormError(null);
+    },
+    onError: (err) => {
+      setSaved(false);
+      setFormError(isApiError(err) ? err.message : 'Unable to save this figure.');
+    },
+  });
+
   return (
-    <div className="space-y-5 text-center">
-      <span className="bg-success-50 mx-auto flex size-14 items-center justify-center rounded-full">
-        <CheckCircle2 className="text-success-700 size-7" aria-hidden="true" />
-      </span>
-      <div className="space-y-1">
-        <h2 className="text-lg font-bold text-neutral-900">Sale Recorded</h2>
-        <p className="font-mono text-sm text-neutral-600">{saleNumber}</p>
+    <div className="rounded-xl bg-neutral-50 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-sm font-semibold text-neutral-900">
+          <span className="font-mono font-bold">{fuel.code}</span>
+          <span className="ml-1.5 font-normal text-neutral-500">{fuel.name}</span>
+        </p>
+        <p className="text-xs text-neutral-500">
+          {currentPrice !== null ? (
+            <>
+              Price now: <PricePerLitreDisplay value={currentPrice} className="text-xs" /> ·{' '}
+            </>
+          ) : null}
+          {existing ? (
+            <>
+              Recorded: <QuantityDisplay value={existing.litresSold} className="text-xs" /> ·{' '}
+              <CurrencyDisplay value={existing.totalAmount} className="text-xs" />
+              {existing.approvalStatus && existing.approvalStatus !== 'APPROVED' ? (
+                <>
+                  {' '}
+                  <StatusBadge domain="saleApproval" value={existing.approvalStatus} size="sm" />
+                </>
+              ) : null}
+            </>
+          ) : (
+            'Not recorded yet today'
+          )}
+        </p>
       </div>
 
-      <div className="rounded-card bg-neutral-100 px-4 py-3 text-left">
-        <div className="flex items-baseline justify-between gap-3 py-1">
-          <span className="text-sm text-neutral-600">Quantity</span>
-          <QuantityDisplay value={litres} className="font-semibold text-neutral-900" />
-        </div>
+      <div className="mt-2 flex items-end gap-2">
+        <Input
+          label={`Total litres for ${fuel.code} today`}
+          type="number"
+          inputMode="decimal"
+          step="0.001"
+          min="0"
+          placeholder="0"
+          value={value}
+          disabled={mutation.isPending}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setSaved(false);
+            setFormError(null);
+          }}
+        />
+        <Button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={!valid || unchanged}
+          loading={mutation.isPending}
+          loadingText="Saving"
+        >
+          {saved && !mutation.isPending ? (
+            <CheckCircle2 className="text-success-700 size-4" aria-hidden="true" />
+          ) : null}
+          {saved && !mutation.isPending ? 'Saved' : 'Save'}
+        </Button>
       </div>
 
-      <Button block size="lg" onClick={onDone}>
-        Record another sale
-      </Button>
+      {valid && parsed !== null && parsed > 0 && currentPrice !== null && !existing ? (
+        <p className="mt-1.5 text-xs text-neutral-500">
+          Estimated total:{' '}
+          <CurrencyDisplay value={estimateTotal(parsed, currentPrice)} className="text-xs" /> at the
+          current price — the server prices the sale when you save.
+        </p>
+      ) : null}
+
+      {existing?.approvalStatus === 'REJECTED' && existing.rejectionReason ? (
+        <p className="text-danger-700 mt-1.5 text-xs">
+          Rejected: {existing.rejectionReason} — revise the figure to submit it for approval again.
+        </p>
+      ) : null}
+
+      {valid && parsed === 0 && existing ? (
+        <p className="text-warning-700 mt-1.5 text-xs">
+          Setting 0 clears today&rsquo;s record and returns its litres to stock.
+        </p>
+      ) : null}
+
+      {formError ? <InlineError message={formError} className="mt-1.5" /> : null}
     </div>
   );
 }

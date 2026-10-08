@@ -14,11 +14,13 @@ describe('navigation is role-aware', () => {
     expect(links).toContain('/deliveries');
     expect(links).toContain('/daily-reports');
     expect(links).toContain('/dashboard');
+    // Product decision 2026-10: managers get a read-only Fuel Prices view so
+    // they always know what the pumps sell at.
+    expect(links).toContain('/fuel-prices');
 
-    // A manager must never see procurement or configuration.
+    // A manager must never see procurement or the rest of configuration.
     expect(links).not.toContain('/suppliers');
     expect(links).not.toContain('/tankers');
-    expect(links).not.toContain('/fuel-prices');
     expect(links).not.toContain('/fuel-types');
     expect(links).not.toContain('/users');
     expect(links).not.toContain('/audit-logs');

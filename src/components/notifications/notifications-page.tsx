@@ -6,11 +6,14 @@ import {
   Bell,
   BellOff,
   CheckCheck,
+  CheckCircle2,
   ClipboardCheck,
   Package,
   ShieldCheck,
+  ShoppingCart,
   Tag,
   Truck,
+  XCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -48,10 +51,17 @@ const TYPE_ICONS: Record<NotificationType, React.ComponentType<{ className?: str
   REPORT_REJECTED: AlertTriangle,
   DELIVERY_RECEIVED: Truck,
   DELIVERY_IN_TRANSIT: Truck,
+  FUEL_ORDER_ASSIGNED: ClipboardCheck,
   DELIVERY_DISCREPANCY: Package,
   LOW_INVENTORY: Package,
   FUEL_PRICE_UPDATE: Tag,
   DAILY_REPORT_MISSING: AlertTriangle,
+  INCIDENT_REPORTED: AlertTriangle,
+  INCIDENT_REVIEWED: ShieldCheck,
+  SALE_RECORDED: ShoppingCart,
+  SALE_APPROVED: CheckCircle2,
+  SALE_REJECTED: XCircle,
+  SALES_NOT_RECORDED: AlertTriangle,
   SYSTEM: Bell,
 };
 
@@ -62,6 +72,7 @@ const TYPE_ICONS: Record<NotificationType, React.ComponentType<{ className?: str
  */
 const RESOURCE_ROUTES: Record<string, (id: string) => string> = {
   DAILY_REPORT: (id) => `/daily-reports?report=${id}`,
+  INCIDENT_REPORT: (id) => `/daily-reports?incident=${id}`,
   DELIVERY: (id) => `/deliveries?delivery=${id}`,
   BRANCH: () => '/inventory',
   FUEL_PRICE: () => '/fuel-prices',
@@ -169,7 +180,7 @@ export function NotificationsPage() {
             ) : null}
           </h1>
           <p className="text-sm text-neutral-500">
-            Price updates, delivery activity, daily report reminders and stock warnings.
+            Price updates, delivery activity, incident reports and stock warnings.
           </p>
         </div>
         {unread > 0 ? (
@@ -216,9 +227,13 @@ export function NotificationsPage() {
             { value: 'DELIVERY_RECEIVED', label: 'Delivery received' },
             { value: 'DELIVERY_DISCREPANCY', label: 'Delivery discrepancy' },
             { value: 'DELIVERY_IN_TRANSIT', label: 'Delivery in transit' },
+            { value: 'FUEL_ORDER_ASSIGNED', label: 'Fuel order assigned' },
             { value: 'LOW_INVENTORY', label: 'Low inventory' },
             { value: 'FUEL_PRICE_UPDATE', label: 'Price update' },
             { value: 'DAILY_REPORT_MISSING', label: 'Report missing' },
+            { value: 'INCIDENT_REPORTED', label: 'Incident reported' },
+            { value: 'INCIDENT_REVIEWED', label: 'Incident reviewed' },
+            { value: 'SALES_NOT_RECORDED', label: 'Sales not recorded' },
             { value: 'SYSTEM', label: 'System' },
           ]}
         />

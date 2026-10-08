@@ -72,6 +72,24 @@ const SALE_TONES: Record<string, BadgeTone> = {
   VOIDED: 'danger',
 };
 
+const SALE_RECORD_MODE_TONES: Record<string, BadgeTone> = {
+  SINGLE: 'neutral',
+  DAY_TOTAL: 'info',
+};
+
+/** Product decision (2026-10) — PENDING wants attention, APPROVED is done. */
+const SALE_APPROVAL_TONES: Record<string, BadgeTone> = {
+  PENDING: 'warning',
+  APPROVED: 'success',
+  REJECTED: 'danger',
+};
+
+/** Product decision (2026-10) — OPEN wants attention, REVIEWED is done. */
+const INCIDENT_TONES: Record<string, BadgeTone> = {
+  OPEN: 'warning',
+  REVIEWED: 'success',
+};
+
 const STATUS_TONES: Record<string, BadgeTone> = {
   ACTIVE: 'success',
   INACTIVE: 'neutral',
@@ -88,7 +106,14 @@ const NOTIFICATION_TONES: Record<string, BadgeTone> = {
   LOW_INVENTORY: 'warning',
   FUEL_PRICE_UPDATE: 'info',
   DELIVERY_IN_TRANSIT: 'warning',
+  FUEL_ORDER_ASSIGNED: 'info',
   DAILY_REPORT_MISSING: 'danger',
+  INCIDENT_REPORTED: 'warning',
+  INCIDENT_REVIEWED: 'success',
+  SALE_RECORDED: 'info',
+  SALE_APPROVED: 'success',
+  SALE_REJECTED: 'danger',
+  SALES_NOT_RECORDED: 'danger',
   SYSTEM: 'neutral',
 };
 
@@ -97,6 +122,9 @@ export const STATUS_TONE_MAPS = {
   delivery: DELIVERY_TONES,
   dailyReport: DAILY_REPORT_TONES,
   sale: SALE_TONES,
+  saleRecordMode: SALE_RECORD_MODE_TONES,
+  saleApproval: SALE_APPROVAL_TONES,
+  incident: INCIDENT_TONES,
   status: STATUS_TONES,
   notification: NOTIFICATION_TONES,
 } as const;

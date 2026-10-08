@@ -1,16 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
 import { createFuelType, createFuelTypeSchema, listFuelTypes } from '@/api/fuel-types.api';
-import { applicablePrice, createFuelPriceSchema, isScheduled } from '@/api/fuel-prices.api';
+import {
+  applicablePrice,
+  createFuelPrice,
+  createFuelPriceSchema,
+  getCurrentPrice,
+  listFuelPrices,
+} from '@/api/fuel-prices.api';
 import { login } from '@/api/auth.api';
-import { resetApiClientForTests, setAccessToken } from '@/api/client';
-import { listFuelPrices } from '@/api/fuel-prices.api';
+import { apiClient, resetApiClientForTests, setAccessToken } from '@/api/client';
 import { FUEL_PRICES, FUEL_TYPES } from '@/mocks/data';
 import { FUEL_TYPE_CODE_PATTERN } from '@/api/fuel-types.api';
 
 async function asAdmin() {
   resetApiClientForTests();
   const session = await login({ email: 'admin@kbyglobal.com', password: 'Password123!' });
+  setAccessToken(session.accessToken);
+}
+
+async function asManager() {
+  resetApiClientForTests();
+  const session = await login({ email: 'manager@kbyglobal.com', password: 'Password123!' });
   setAccessToken(session.accessToken);
 }
 
@@ -89,20 +100,9 @@ describe('applicablePrice (doc 08 §17)', () => {
     expect(applicablePrice(prices, new Date('2020-01-01T00:00:00Z'))).toBeNull();
   });
 
-  it('ignores a future price for a present instant', () => {
-    const now = new Date();
-    expect(applicablePrice(prices, now)?.pricePerLitre).toBe(1600);
-  });
-});
-
-describe('isScheduled (doc 08 §26)', () => {
-  it('flags a future price', () => {
-    const future = FUEL_PRICES.find((p) => isScheduled(p));
-    expect(future).toBeDefined();
-  });
-
-  it('does not flag a past or present price', () => {
-    expect(FUEL_PRICES.filter((p) => isScheduled(p)).length).toBe(1);
+  it('has no future-dated fixtures — a price is never scheduled', () => {
+    const now = Date.now();
+    expect(FUEL_PRICES.every((p) => +new Date(p.effectiveFrom) <= now)).toBe(true);
   });
 });
 
@@ -110,10 +110,9 @@ describe('fuel price validation (doc 08 §71)', () => {
   const valid = {
     fuelTypeId: FUEL_TYPES[0]!.id,
     pricePerLitre: 1650,
-    effectiveFrom: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
   };
 
-  it('accepts a positive future price', () => {
+  it('accepts a positive price', () => {
     expect(createFuelPriceSchema.safeParse(valid).success).toBe(true);
   });
 
@@ -122,18 +121,10 @@ describe('fuel price validation (doc 08 §71)', () => {
     expect(createFuelPriceSchema.safeParse({ ...valid, pricePerLitre: -5 }).success).toBe(false);
   });
 
-  it('rejects a backdated price (doc 08 §27)', () => {
-    const past = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-    const result = createFuelPriceSchema.safeParse({ ...valid, effectiveFrom: past });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues[0]?.message).toMatch(/backdated/i);
-    }
-  });
-
-  it('accepts today', () => {
-    const today = new Date().toISOString().slice(0, 10);
-    expect(createFuelPriceSchema.safeParse({ ...valid, effectiveFrom: today }).success).toBe(true);
+  it('carries no effective date — the server stamps the instant', () => {
+    const legacyPayload = { ...valid, effectiveFrom: new Date().toISOString() };
+    const parsed = createFuelPriceSchema.parse(legacyPayload);
+    expect('effectiveFrom' in parsed).toBe(false);
   });
 });
 
@@ -156,28 +147,69 @@ describe('fuel prices listing', () => {
           (p.effectiveTo === null || +new Date(p.effectiveTo) > now),
       ),
     ).toBe(true);
-    // The seeded future PMS price must not appear as active.
-    expect(data.some((p) => p.pricePerLitre === 1650)).toBe(false);
+    // The seeded PMS price in force today.
+    expect(data.some((p) => p.pricePerLitre === 1600)).toBe(true);
   });
 });
 
-describe('price overlap protection (doc 08 §20)', () => {
-  it('rejects a price period that overlaps an existing one', async () => {
+describe('immediate price changes (product decision 2026-10)', () => {
+  it('applies the new price at once, closing the current period at the same instant', async () => {
     await asAdmin();
-    const existing = FUEL_PRICES.find(
-      (p) => p.effectiveTo === null && p.fuelTypeId === FUEL_TYPES[1]!.id,
-    )!;
-    const { createFuelPrice } = await import('@/api/fuel-prices.api');
+    const before = await getCurrentPrice(FUEL_TYPES[0]!.id);
+    expect(before.pricePerLitre).toBe(1600);
 
+    const created = await createFuelPrice({ fuelTypeId: FUEL_TYPES[0]!.id, pricePerLitre: 1725 });
+    expect(+new Date(created.effectiveFrom)).toBeLessThanOrEqual(Date.now());
+    expect(created.effectiveTo).toBeNull();
+
+    const after = await getCurrentPrice(FUEL_TYPES[0]!.id);
+    expect(after.pricePerLitre).toBe(1725);
+
+    const { data } = await listFuelPrices({ fuelTypeId: FUEL_TYPES[0]!.id, limit: 100 });
+    const previous = data.find((p) => p.pricePerLitre === 1600)!;
+    expect(previous.effectiveTo).toBe(created.effectiveFrom);
+  });
+
+  it('drops a legacy scheduled period instead of scheduling around it', async () => {
+    await asAdmin();
+    FUEL_PRICES.push({
+      id: crypto.randomUUID(),
+      fuelTypeId: FUEL_TYPES[1]!.id,
+      pricePerLitre: 9999,
+      effectiveFrom: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+      effectiveTo: null,
+    });
+
+    await createFuelPrice({ fuelTypeId: FUEL_TYPES[1]!.id, pricePerLitre: 1800 });
+
+    const { data } = await listFuelPrices({ fuelTypeId: FUEL_TYPES[1]!.id, limit: 100 });
+    expect(data.some((p) => p.pricePerLitre === 9999)).toBe(false);
+    const after = await getCurrentPrice(FUEL_TYPES[1]!.id);
+    expect(after.pricePerLitre).toBe(1800);
+  });
+
+  it('rejects an effectiveFrom outright — scheduling no longer exists', async () => {
+    await asAdmin();
     await expect(
-      createFuelPrice({
-        fuelTypeId: existing.fuelTypeId,
-        pricePerLitre: 1900,
-        // Lands inside the existing open-ended interval.
-        effectiveFrom: new Date(new Date(existing.effectiveFrom).getTime() + 86_400_000)
-          .toISOString()
-          .slice(0, 10),
+      apiClient.post('/fuel-prices', {
+        fuelTypeId: FUEL_TYPES[0]!.id,
+        pricePerLitre: 1700,
+        effectiveFrom: new Date(Date.now() + 86_400_000).toISOString(),
       }),
-    ).rejects.toMatchObject({ statusCode: 422, code: 'INVALID_FUEL_PRICE' });
+    ).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
+  });
+
+  it('lets a manager read prices but not change them', async () => {
+    await asAdmin();
+    await createFuelPrice({ fuelTypeId: FUEL_TYPES[0]!.id, pricePerLitre: 1680 });
+
+    await asManager();
+    const { data } = await listFuelPrices({ fuelTypeId: FUEL_TYPES[0]!.id, limit: 100 });
+    expect(data.length).toBeGreaterThan(0);
+    const current = await getCurrentPrice(FUEL_TYPES[0]!.id);
+    expect(current.pricePerLitre).toBe(1680);
+    await expect(
+      createFuelPrice({ fuelTypeId: FUEL_TYPES[0]!.id, pricePerLitre: 1700 }),
+    ).rejects.toMatchObject({ statusCode: 403 });
   });
 });

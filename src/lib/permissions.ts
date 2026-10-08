@@ -5,10 +5,12 @@
  * authority (doc 06 §56 — "Frontend authorization = UX / Backend authorization =
  * Security"). Nothing here is a security control; it only decides what to render.
  *
- * Matrix source: doc 06 §28 and doc 07 §56, adjusted by product decision
+ * Matrix source: doc 06 §28 and doc 07 §56, adjusted by product decisions
  * (2026-10): SUPER_ADMIN no longer manages branches or users — that is the
- * ADMIN's job; the platform role adds businesses as a whole. ADMIN no longer
- * has a Sales view: sales totals are recorded by branch managers only.
+ * ADMIN's job; the platform role adds businesses as a whole. Managers record
+ * the day's totals, and every manager recording passes an admin approval
+ * gate, so the ADMIN view has a Sales page for review (approval) alongside
+ * the manager's recording view.
  */
 
 import type { UserRole } from '@/types/domain';
@@ -37,6 +39,7 @@ export const CAPABILITIES = [
   'inventory.adjust',
   'sales.view',
   'sales.record',
+  'sales.approve',
   'sales.void',
   'dailyReport.view',
   'dailyReport.submit',
@@ -76,6 +79,7 @@ const ROLE_CAPABILITIES: Record<UserRole, ReadonlySet<Capability>> = {
     'inventory.adjust',
     'sales.view',
     'sales.record',
+    'sales.approve',
     'sales.void',
     'dailyReport.view',
     'dailyReport.review',
@@ -104,8 +108,12 @@ const ROLE_CAPABILITIES: Record<UserRole, ReadonlySet<Capability>> = {
     'delivery.receive',
     'inventory.view',
     'inventory.adjust',
-    // Product decision: no Sales tab in the admin view; managers record the
-    // day's totals. sales.void stays only as a vestige of the old matrix.
+    // Product decision (2026-10): managers record the day's totals and an
+    // admin confirms each figure, so the admin view carries the Sales review
+    // queue (sales.view) with approve/reject (sales.approve). Admins do not
+    // record sales themselves — that stays with the branch managers.
+    'sales.view',
+    'sales.approve',
     'sales.void',
     'dailyReport.view',
     'dailyReport.review',

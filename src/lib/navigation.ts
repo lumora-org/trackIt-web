@@ -10,6 +10,7 @@
  */
 
 import {
+  AlertTriangle,
   BarChart3,
   Building2,
   ClipboardCheck,
@@ -65,8 +66,9 @@ const dashboard = (role: UserRole): NavItem => ({
 /* ---------------------------------------------------------- manager first */
 
 /**
- * doc 02 §39 lists exactly this manager set: Dashboard, Record Sale, Products,
- * Deliveries, Daily Reports, Notifications.
+ * doc 02 §39 originally listed Daily Reports for the manager; the 2026-10
+ * product decision split the two ideas: Record Sale now carries the money
+ * (day totals), and this section is the manager's incident log.
  */
 const MANAGER_NAV: RoleNav = {
   groups: [
@@ -95,10 +97,18 @@ const MANAGER_NAV: RoleNav = {
         },
         {
           href: '/daily-reports',
-          label: 'Daily Reports',
-          icon: ClipboardCheck,
-          shortLabel: 'Reports',
+          label: 'Incident Reports',
+          icon: AlertTriangle,
+          shortLabel: 'Incidents',
           capabilities: ['dailyReport.view'],
+        },
+        // Read-only for managers: what the pumps sell at today. Admin price
+        // changes take effect immediately and arrive as a notification.
+        {
+          href: '/fuel-prices',
+          label: 'Fuel Prices',
+          icon: Tag,
+          capabilities: ['fuelPrice.view'],
         },
       ],
     },
@@ -131,9 +141,9 @@ const MANAGER_NAV: RoleNav = {
     },
     {
       href: '/daily-reports',
-      label: 'Daily Reports',
-      icon: ClipboardCheck,
-      shortLabel: 'Reports',
+      label: 'Incident Reports',
+      icon: AlertTriangle,
+      shortLabel: 'Incidents',
       capabilities: ['dailyReport.view'],
     },
   ],
@@ -158,6 +168,14 @@ const ADMIN_NAV: RoleNav = {
           label: 'Deliveries',
           icon: Truck,
           capabilities: ['delivery.view'],
+        },
+        // Product decision (2026-10) — the manager's recording passes an
+        // admin approval gate, so the admin view reviews what was recorded.
+        {
+          href: '/sales',
+          label: 'Sales',
+          icon: ShoppingCart,
+          capabilities: ['sales.view'],
         },
         {
           href: '/daily-reports',

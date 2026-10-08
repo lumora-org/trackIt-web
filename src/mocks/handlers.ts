@@ -17,9 +17,11 @@ import type {
   AuthenticatedUser,
   Branch,
   DailyReport,
+  DailySalesSummaryRow,
   Delivery,
   FuelOrder,
   FuelOrderStatus,
+  IncidentReport,
   Sale,
   User,
 } from '@/types/domain';
@@ -35,6 +37,7 @@ import {
   FUEL_ORDERS,
   FUEL_PRICES,
   FUEL_TYPES,
+  INCIDENT_REPORTS,
   INVENTORY_STOCK,
   INVENTORY_TRANSACTIONS,
   NOTIFICATIONS,
@@ -185,6 +188,59 @@ function currentStock(branchId: string, fuelTypeId: string): number {
     INVENTORY_STOCK.find((s) => s.branchId === branchId && s.fuelTypeId === fuelTypeId)
       ?.currentQuantityLitres ?? 0
   );
+}
+
+/*
+ * Product decision (2026-10) — every recorded sale fans a SALE_RECORDED
+ * notification out to the business's admins. The mock feed is recipient-free
+ * (every signed-in user reads the same list), so one row models the fan-out.
+ */
+function notifyAdminsOfSale(sale: Sale, title: string, message: string) {
+  NOTIFICATIONS.unshift({
+    id: crypto.randomUUID(),
+    type: 'SALE_RECORDED',
+    title,
+    message,
+    status: 'UNREAD',
+    resourceType: 'SALE',
+    resourceId: sale.id,
+    createdAt: new Date().toISOString(),
+    readAt: null,
+  });
+}
+
+/*
+ * Product decision (2026-10) — a manager's recording awaits confirmation;
+ * an admin's is confirmed by definition (mirrors the API).
+ */
+function approvalStamp(user: AuthenticatedUser) {
+  if (user.role === 'MANAGER') {
+    return { approvalStatus: 'PENDING' as const, approvedAt: null };
+  }
+  return { approvalStatus: 'APPROVED' as const, approvedAt: new Date().toISOString() };
+}
+
+/*
+ * Product decision (2026-10) — the manager who recorded a figure is told how
+ * the review ended. The mock feed is recipient-free, so one row models it.
+ */
+function notifyRecorderOfDecision(
+  sale: Sale,
+  type: 'SALE_APPROVED' | 'SALE_REJECTED',
+  title: string,
+  message: string,
+) {
+  NOTIFICATIONS.unshift({
+    id: crypto.randomUUID(),
+    type,
+    title,
+    message,
+    status: 'UNREAD',
+    resourceType: 'SALE',
+    resourceId: sale.id,
+    createdAt: new Date().toISOString(),
+    readAt: null,
+  });
 }
 
 /* ------------------------------------------------------------------ handlers */
@@ -777,49 +833,55 @@ export const handlers = [
     if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN']))
       return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
 
-    const body = (await request.json()) as {
-      fuelTypeId?: string;
-      pricePerLitre?: number;
-      effectiveFrom?: string;
-    };
+    const body = (await request.json()) as Record<string, unknown>;
     const fieldErrors: ApiFieldError[] = [];
-    if (!body.fuelTypeId)
-      fieldErrors.push({ field: 'fuelTypeId', message: 'fuelTypeId is required' });
+    // Mirrors the API's forbidNonWhitelisted pipe: there is no effective date
+    // anymore — a price change always starts immediately (product decision).
+    const allowedKeys = new Set(['fuelTypeId', 'pricePerLitre']);
+    for (const key of Object.keys(body)) {
+      if (!allowedKeys.has(key)) {
+        fieldErrors.push({ field: key, message: `property ${key} should not exist` });
+      }
+    }
+    const fuelTypeId = typeof body.fuelTypeId === 'string' ? body.fuelTypeId : undefined;
+    if (!fuelTypeId) fieldErrors.push({ field: 'fuelTypeId', message: 'fuelTypeId is required' });
     // doc 08 §71 — @IsPositive()
-    if (!body.pricePerLitre || body.pricePerLitre <= 0) {
+    const pricePerLitre = typeof body.pricePerLitre === 'number' ? body.pricePerLitre : undefined;
+    if (pricePerLitre === undefined || pricePerLitre <= 0) {
       fieldErrors.push({ field: 'pricePerLitre', message: 'pricePerLitre must be greater than 0' });
     }
-    if (!body.effectiveFrom)
-      fieldErrors.push({ field: 'effectiveFrom', message: 'effectiveFrom is required' });
     if (fieldErrors.length > 0)
       return error(400, 'VALIDATION_ERROR', 'Validation failed', fieldErrors);
 
-    const from = new Date(body.effectiveFrom!);
-    const fuelTypeId = body.fuelTypeId!;
+    const now = new Date();
 
-    // doc 08 §20 — price periods must never overlap for the same business+fuel.
-    const overlaps = FUEL_PRICES.some((p) => {
-      if (p.fuelTypeId !== fuelTypeId) return false;
-      const start = new Date(p.effectiveFrom);
-      const end = p.effectiveTo ? new Date(p.effectiveTo) : new Date(8.64e15);
-      return from < end && from >= start;
-    });
-    if (overlaps) {
-      return error(422, 'INVALID_FUEL_PRICE', 'This price period overlaps an existing price.');
+    // No scheduling: retire any future-dated period (legacy data) first so the
+    // new open-ended interval cannot clash with it.
+    for (let index = FUEL_PRICES.length - 1; index >= 0; index -= 1) {
+      const price = FUEL_PRICES[index]!;
+      if (
+        price.fuelTypeId === fuelTypeId &&
+        new Date(price.effectiveFrom).getTime() > now.getTime()
+      ) {
+        FUEL_PRICES.splice(index, 1);
+      }
     }
 
-    // doc 08 §24 — close the open-ended price atomically, then create.
-    const open = FUEL_PRICES.find(
+    // doc 08 §24 — the interval in force right now is closed exactly at
+    // `now`, then the new one opens at the same instant.
+    const current = FUEL_PRICES.find(
       (p) =>
-        p.fuelTypeId === fuelTypeId && p.effectiveTo === null && new Date(p.effectiveFrom) <= from,
+        p.fuelTypeId === fuelTypeId &&
+        new Date(p.effectiveFrom).getTime() <= now.getTime() &&
+        (p.effectiveTo === null || new Date(p.effectiveTo).getTime() > now.getTime()),
     );
-    if (open) open.effectiveTo = from.toISOString();
+    if (current) current.effectiveTo = now.toISOString();
 
     const created = {
       id: crypto.randomUUID(),
-      fuelTypeId,
-      pricePerLitre: body.pricePerLitre!,
-      effectiveFrom: from.toISOString(),
+      fuelTypeId: fuelTypeId!,
+      pricePerLitre: pricePerLitre!,
+      effectiveFrom: now.toISOString(),
       effectiveTo: null,
     };
     FUEL_PRICES.push(created);
@@ -1400,10 +1462,19 @@ export const handlers = [
     if (branchId) rows = rows.filter((s) => s.branchId === branchId);
     const fuelTypeId = url.searchParams.get('fuelTypeId');
     if (fuelTypeId) rows = rows.filter((s) => s.fuelTypeId === fuelTypeId);
+    const recordMode = url.searchParams.get('recordMode');
+    if (recordMode) rows = rows.filter((s) => (s.recordMode ?? 'SINGLE') === recordMode);
+    // The admin confirmation gate (product decision 2026-10); legacy rows
+    // read APPROVED, matching the migration backfill.
+    const approvalStatus = url.searchParams.get('approvalStatus');
+    if (approvalStatus) {
+      rows = rows.filter((s) => (s.approvalStatus ?? 'APPROVED') === approvalStatus);
+    }
+    // from/to are bare business days, so only the date part participates.
     const from = url.searchParams.get('from');
-    if (from) rows = rows.filter((s) => s.soldAt >= from);
+    if (from) rows = rows.filter((s) => s.soldAt.slice(0, 10) >= from);
     const to = url.searchParams.get('to');
-    if (to) rows = rows.filter((s) => s.soldAt <= to);
+    if (to) rows = rows.filter((s) => s.soldAt.slice(0, 10) <= to);
 
     rows.sort((a, b) => +new Date(b.soldAt) - +new Date(a.soldAt));
     const { slice, meta } = paginate(rows, url);
@@ -1495,12 +1566,309 @@ export const handlers = [
       litresSold: body.litresSold!,
       unitPrice: price.pricePerLitre,
       totalAmount: body.litresSold! * price.pricePerLitre,
+      ...approvalStamp(user),
+      rejectionReason: null,
       soldAt: soldAt.toISOString(),
       voidedAt: null,
       voidReason: null,
     };
     SALES.unshift(sale);
+    notifyAdminsOfSale(
+      sale,
+      `Sale recorded: ${sale.saleNumber}`,
+      `${user.firstName} ${user.lastName} recorded ${sale.litresSold} L of ${fuel.code} at ${BRANCHES.find((b) => b.id === sale.branchId)?.name ?? 'a branch'} for ${sale.totalAmount}.`,
+    );
     return HttpResponse.json({ data: sale }, { status: 201 });
+  }),
+
+  /*
+   * Product decision (2026-10) — the day-total upsert. The manager enters the
+   * branch's running total for one fuel on one business day; only the delta
+   * between the previous and the new figure moves stock. `0` clears the day
+   * and restores its litres; an unchanged figure is a no-op returning the row.
+   */
+  http.post(`${API}/sales/day-total`, async ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN', 'MANAGER'])) {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+    }
+
+    const body = (await request.json()) as {
+      branchId?: string;
+      fuelTypeId?: string;
+      totalLitres?: number;
+      date?: string;
+    };
+    const fieldErrors: ApiFieldError[] = [];
+    if (!body.branchId) fieldErrors.push({ field: 'branchId', message: 'branchId is required' });
+    if (!body.fuelTypeId)
+      fieldErrors.push({ field: 'fuelTypeId', message: 'fuelTypeId is required' });
+    if (body.totalLitres === undefined || body.totalLitres < 0) {
+      fieldErrors.push({ field: 'totalLitres', message: 'totalLitres cannot be negative' });
+    }
+    if (fieldErrors.length > 0)
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', fieldErrors);
+
+    // doc 04 §93 — a manager is pinned to their branch.
+    if (user.role === 'MANAGER' && body.branchId !== user.branchId) {
+      return error(403, 'BRANCH_ACCESS_DENIED', 'Access denied.');
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const date = body.date ?? today;
+    if (date > today) {
+      return error(422, 'INVALID_OPERATION', 'A future day cannot be recorded.');
+    }
+
+    const fuel = FUEL_TYPES.find((f) => f.id === body.fuelTypeId);
+    if (!fuel) return error(404, 'RESOURCE_NOT_FOUND', 'Fuel type not found.');
+    if (fuel.status !== 'ACTIVE') {
+      return error(422, 'INVALID_OPERATION', 'This fuel type is not active.');
+    }
+
+    const branchId = body.branchId!;
+    const total = body.totalLitres!;
+    const branchName = BRANCHES.find((b) => b.id === branchId)?.name ?? 'a branch';
+    // sold_at is pinned to noon of the business day, matching the backend.
+    const soldAt = new Date(`${date}T12:00:00.000Z`);
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    const stock = INVENTORY_STOCK.find((s) => s.branchId === branchId && s.fuelTypeId === fuel.id);
+
+    const existing = SALES.find(
+      (s) =>
+        s.branchId === branchId &&
+        s.fuelTypeId === fuel.id &&
+        !s.voidedAt &&
+        s.recordMode === 'DAY_TOTAL' &&
+        s.soldAt.slice(0, 10) === date,
+    );
+
+    const moveStock = (deltaLitres: number, reason?: string) => {
+      if (!stock || deltaLitres === 0) return;
+      stock.currentQuantityLitres -= deltaLitres;
+      INVENTORY_TRANSACTIONS.unshift({
+        id: crypto.randomUUID(),
+        branchId,
+        fuelTypeId: fuel.id,
+        transactionType: deltaLitres > 0 ? 'SALE' : 'CORRECTION',
+        quantityLitres: -deltaLitres,
+        balanceAfter: stock.currentQuantityLitres,
+        referenceType: 'SALE',
+        referenceId: existing?.id ?? null,
+        occurredAt: new Date().toISOString(),
+        ...(reason ? { reason } : {}),
+      });
+    };
+
+    // No figure yet: create the day row (a zero total is a no-op).
+    if (!existing) {
+      if (total === 0) return ok(null);
+
+      // Priced at the interval in force NOW, not the pinned noon instant, so
+      // an admin's mid-day price change applies to everything recorded after
+      // it (mirrors the API).
+      const price = resolvePrice(user.businessId ?? BUSINESS_ID, fuel.id, new Date());
+      if (!price) {
+        return error(
+          422,
+          'INVALID_FUEL_PRICE',
+          'No price is configured for this fuel type at this time.',
+        );
+      }
+      if (total > currentStock(branchId, fuel.id)) {
+        return error(
+          422,
+          'INSUFFICIENT_INVENTORY',
+          `There is not enough ${fuel.code} inventory available.`,
+        );
+      }
+
+      saleCounter += 1;
+      const sale: Sale = {
+        id: crypto.randomUUID(),
+        saleNumber: `SALE-${soldAt.getUTCFullYear()}-${String(saleCounter).padStart(6, '0')}`,
+        branchId,
+        fuelTypeId: fuel.id,
+        fuelTypeName: fuel.code,
+        litresSold: total,
+        unitPrice: price.pricePerLitre,
+        totalAmount: round2(total * price.pricePerLitre),
+        recordMode: 'DAY_TOTAL',
+        ...approvalStamp(user),
+        rejectionReason: null,
+        soldAt: soldAt.toISOString(),
+        voidedAt: null,
+        voidReason: null,
+      };
+      SALES.unshift(sale);
+      if (stock) {
+        stock.currentQuantityLitres -= total;
+        INVENTORY_TRANSACTIONS.unshift({
+          id: crypto.randomUUID(),
+          branchId,
+          fuelTypeId: fuel.id,
+          transactionType: 'SALE',
+          quantityLitres: -total,
+          balanceAfter: stock.currentQuantityLitres,
+          referenceType: 'SALE',
+          referenceId: sale.id,
+          occurredAt: new Date().toISOString(),
+        });
+      }
+      notifyAdminsOfSale(
+        sale,
+        `Day total recorded: ${sale.saleNumber}`,
+        `${user.firstName} ${user.lastName} recorded ${total} L of ${fuel.code} at ${branchName} (${date}).`,
+      );
+      return ok(sale);
+    }
+
+    // An unchanged figure is a no-op that returns the current row.
+    if (total === existing.litresSold) return ok(existing);
+
+    const previous = existing.litresSold;
+
+    // 0 clears the day and returns its litres to stock.
+    if (total === 0) {
+      existing.voidedAt = new Date().toISOString();
+      existing.voidReason = 'Day total cleared';
+      if (stock) {
+        stock.currentQuantityLitres += previous;
+        INVENTORY_TRANSACTIONS.unshift({
+          id: crypto.randomUUID(),
+          branchId,
+          fuelTypeId: fuel.id,
+          transactionType: 'CORRECTION',
+          quantityLitres: previous,
+          balanceAfter: stock.currentQuantityLitres,
+          referenceType: 'SALE',
+          referenceId: existing.id,
+          occurredAt: new Date().toISOString(),
+          reason: 'Day total cleared',
+        });
+      }
+      notifyAdminsOfSale(
+        existing,
+        `Day total cleared: ${existing.saleNumber}`,
+        `${user.firstName} ${user.lastName} cleared the ${fuel.code} day total at ${branchName} for ${date}; ${previous} L returned to stock.`,
+      );
+      return ok(null);
+    }
+
+    /*
+     * The whole day figure is (re)valued at the price in force NOW — never a
+     * weighted average of the day's intervals — so the row always balances
+     * exactly as litres x the admin's current price. The ledger still moves
+     * only the delta, and a revision re-opens the approval gate (mirrors the
+     * API).
+     */
+    const price = resolvePrice(user.businessId ?? BUSINESS_ID, fuel.id, new Date());
+    if (!price) {
+      return error(
+        422,
+        'INVALID_FUEL_PRICE',
+        'No price is configured for this fuel type at this time.',
+      );
+    }
+
+    if (total > previous) {
+      const delta = total - previous;
+      if (delta > currentStock(branchId, fuel.id)) {
+        return error(
+          422,
+          'INSUFFICIENT_INVENTORY',
+          `There is not enough ${fuel.code} inventory available.`,
+        );
+      }
+      moveStock(delta);
+    } else {
+      moveStock(-(previous - total), 'Day total revised downwards');
+    }
+
+    existing.litresSold = total;
+    existing.unitPrice = price.pricePerLitre;
+    existing.totalAmount = round2(total * price.pricePerLitre);
+    Object.assign(existing, approvalStamp(user), { rejectionReason: null });
+    notifyAdminsOfSale(
+      existing,
+      `Day total revised: ${existing.saleNumber}`,
+      `${user.firstName} ${user.lastName} revised the ${fuel.code} day total at ${branchName} for ${date}: ${previous} L -> ${total} L.`,
+    );
+    return ok(existing);
+  }),
+
+  /*
+   * Product decision (2026-10) — the admin confirmation gate. Approval is
+   * workflow metadata: the figures count exactly the same whatever the
+   * status, so nothing recomputes here. A REJECTED figure can be approved
+   * too, reversing a refusal.
+   */
+  http.post(`${API}/sales/:id/approve`, async ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN'])) {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+    }
+    const sale = SALES.find((s) => s.id === params.id);
+    if (!sale) return error(404, 'RESOURCE_NOT_FOUND', 'Sale not found.');
+    if (sale.voidedAt) return error(422, 'INVALID_OPERATION', 'A voided sale cannot be approved.');
+    if (sale.approvalStatus === 'APPROVED') {
+      return error(422, 'INVALID_OPERATION', 'This sale has already been approved.');
+    }
+
+    sale.approvalStatus = 'APPROVED';
+    sale.approvedAt = new Date().toISOString();
+    sale.rejectionReason = null;
+    notifyRecorderOfDecision(
+      sale,
+      'SALE_APPROVED',
+      `Sale approved: ${sale.saleNumber}`,
+      `${user.firstName} ${user.lastName} approved your figure of ${sale.litresSold} L of ${sale.fuelTypeName ?? 'fuel'} (${sale.totalAmount}).`,
+    );
+    return ok(sale);
+  }),
+
+  /*
+   * Product decision (2026-10) — refuse a figure that is awaiting review,
+   * with a mandatory reason. The figures stay on the books; the manager is
+   * notified and their revision returns the row to PENDING.
+   */
+  http.post(`${API}/sales/:id/reject`, async ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN'])) {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+    }
+    const sale = SALES.find((s) => s.id === params.id);
+    if (!sale) return error(404, 'RESOURCE_NOT_FOUND', 'Sale not found.');
+    if (sale.voidedAt) return error(422, 'INVALID_OPERATION', 'A voided sale cannot be rejected.');
+    if (sale.approvalStatus !== 'PENDING') {
+      return error(422, 'INVALID_OPERATION', 'Only a sale awaiting review can be rejected.');
+    }
+
+    const body = (await request.json()) as { reason?: string };
+    const reason = body.reason?.trim() ?? '';
+    if (reason.length < 3) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', [
+        { field: 'reason', message: 'a rejection reason is required and must be meaningful' },
+      ]);
+    }
+
+    sale.approvalStatus = 'REJECTED';
+    sale.approvedAt = null;
+    sale.rejectionReason = reason;
+    notifyRecorderOfDecision(
+      sale,
+      'SALE_REJECTED',
+      `Sale rejected: ${sale.saleNumber}`,
+      `Your figure of ${sale.litresSold} L of ${sale.fuelTypeName ?? 'fuel'} was rejected: ${reason}` +
+        (sale.recordMode === 'DAY_TOTAL'
+          ? ' Revise the day total to submit a corrected figure.'
+          : ' Contact an admin to void the sale if it must be reversed.'),
+    );
+    return ok(sale);
   }),
 
   http.post(`${API}/sales/:id/void`, async ({ request, params }) => {
@@ -1564,6 +1932,96 @@ export const handlers = [
     if (to) rows = rows.filter((r) => r.reportDate <= to);
 
     rows.sort((a, b) => b.reportDate.localeCompare(a.reportDate));
+    const { slice, meta } = paginate(rows, url);
+    return ok(slice, meta);
+  }),
+
+  /*
+   * Product decision (2026-10) — the admin roll-up: every manager sale record
+   * grouped by (business day, branch), with its per-fuel split and the
+   * branch's incident counts. ADMIN / SUPER_ADMIN only.
+   */
+  http.get(`${API}/daily-reports/summary`, ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN'])) {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+    }
+
+    const url = new URL(request.url);
+    const branchId = url.searchParams.get('branchId');
+    const businessId = url.searchParams.get('businessId');
+    const defaultFrom = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() - 29);
+      return d.toISOString().slice(0, 10);
+    })();
+    const from = url.searchParams.get('from') ?? defaultFrom;
+    const to = url.searchParams.get('to') ?? new Date().toISOString().slice(0, 10);
+
+    const visible = (id: string) => {
+      const branch = BRANCHES.find((b) => b.id === id);
+      if (!branch) return false;
+      if (branchId && branch.id !== branchId) return false;
+      if (businessId && branch.businessId !== businessId) return false;
+      return user.role === 'SUPER_ADMIN' || branch.businessId === user.businessId;
+    };
+
+    const groups = new Map<string, DailySalesSummaryRow>();
+    for (const sale of SALES) {
+      if (sale.voidedAt) continue;
+      const date = sale.soldAt.slice(0, 10);
+      if (date < from || date > to) continue;
+      if (!visible(sale.branchId)) continue;
+
+      const branch = BRANCHES.find((b) => b.id === sale.branchId)!;
+      const key = `${sale.branchId}|${date}`;
+      const row = groups.get(key) ?? {
+        date,
+        businessId: branch.businessId,
+        businessName: BUSINESS.name,
+        branchId: branch.id,
+        branchName: branch.name,
+        saleCount: 0,
+        totalLitres: 0,
+        totalRevenue: 0,
+        incidentCount: 0,
+        openIncidentCount: 0,
+        fuels: [],
+      };
+      row.saleCount += 1;
+      row.totalLitres += sale.litresSold;
+      row.totalRevenue += sale.totalAmount;
+      const fuel = row.fuels.find((f) => f.fuelTypeId === sale.fuelTypeId);
+      if (fuel) {
+        fuel.litresSold += sale.litresSold;
+        fuel.revenue += sale.totalAmount;
+      } else {
+        row.fuels.push({
+          fuelTypeId: sale.fuelTypeId,
+          fuelTypeName: sale.fuelTypeName ?? FUEL_TYPES.find((f) => f.id === sale.fuelTypeId)?.code,
+          litresSold: sale.litresSold,
+          revenue: sale.totalAmount,
+        });
+      }
+      groups.set(key, row);
+    }
+
+    // Incidents attach to an existing day row; a day with no sales records
+    // does not produce a roll-up row.
+    for (const incident of INCIDENT_REPORTS) {
+      if (incident.incidentDate < from || incident.incidentDate > to) continue;
+      if (!visible(incident.branchId)) continue;
+      const row = groups.get(`${incident.branchId}|${incident.incidentDate}`);
+      if (!row) continue;
+      row.incidentCount += 1;
+      if (incident.status === 'OPEN') row.openIncidentCount += 1;
+    }
+
+    const rows = [...groups.values()].sort(
+      (a, b) =>
+        b.date.localeCompare(a.date) || (a.branchName ?? '').localeCompare(b.branchName ?? ''),
+    );
     const { slice, meta } = paginate(rows, url);
     return ok(slice, meta);
   }),
@@ -1715,6 +2173,117 @@ export const handlers = [
     }),
   ),
 
+  /* ---------------------------------------------------------- incidents */
+
+  http.get(`${API}/incident-reports`, ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    const url = new URL(request.url);
+    let rows = [...INCIDENT_REPORTS];
+    const branchId = scopeBranch(user, url.searchParams.get('branchId'));
+    if (branchId) rows = rows.filter((r) => r.branchId === branchId);
+    const status = url.searchParams.get('status');
+    if (status) rows = rows.filter((r) => r.status === status);
+    const from = url.searchParams.get('from');
+    if (from) rows = rows.filter((r) => r.incidentDate >= from);
+    const to = url.searchParams.get('to');
+    if (to) rows = rows.filter((r) => r.incidentDate <= to);
+
+    rows.sort(
+      (a, b) =>
+        b.incidentDate.localeCompare(a.incidentDate) || b.createdAt.localeCompare(a.createdAt),
+    );
+    const { slice, meta } = paginate(rows, url);
+    return ok(slice, meta);
+  }),
+
+  http.get(`${API}/incident-reports/:id`, ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    const incident = INCIDENT_REPORTS.find((r) => r.id === params.id);
+    if (!incident) return error(404, 'RESOURCE_NOT_FOUND', 'Incident report not found.');
+    // doc 04 §93 — a manager must never see another branch's data.
+    if (user.role === 'MANAGER' && incident.branchId !== user.branchId) {
+      return error(403, 'BRANCH_ACCESS_DENIED', 'Access denied.');
+    }
+    return ok(incident);
+  }),
+
+  http.post(`${API}/incident-reports`, async ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN', 'MANAGER'])) {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
+    }
+
+    const body = (await request.json()) as {
+      branchId?: string;
+      incidentDate?: string;
+      title?: string;
+      description?: string;
+    };
+    const fieldErrors: ApiFieldError[] = [];
+    if (!body.branchId) fieldErrors.push({ field: 'branchId', message: 'branchId is required' });
+    if (!body.title || body.title.trim().length < 3) {
+      fieldErrors.push({ field: 'title', message: 'Give the incident a short title' });
+    }
+    if (!body.description || body.description.trim().length < 3) {
+      fieldErrors.push({ field: 'description', message: 'Describe what happened' });
+    }
+    if (fieldErrors.length > 0)
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', fieldErrors);
+
+    if (user.role === 'MANAGER' && body.branchId !== user.branchId) {
+      return error(403, 'BRANCH_ACCESS_DENIED', 'Access denied.');
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const incidentDate = body.incidentDate ?? today;
+    if (incidentDate > today) {
+      return error(422, 'INVALID_OPERATION', 'An incident cannot be dated in the future.');
+    }
+
+    const branch = BRANCHES.find((b) => b.id === body.branchId);
+    if (!branch) return error(404, 'RESOURCE_NOT_FOUND', 'Branch not found.');
+
+    const incident: IncidentReport = {
+      id: crypto.randomUUID(),
+      branchId: branch.id,
+      branchName: branch.name,
+      incidentDate,
+      title: body.title!.trim(),
+      description: body.description!.trim(),
+      status: 'OPEN',
+      reportedBy: user.id,
+      reportedByName: `${user.firstName} ${user.lastName}`.trim(),
+      reviewedBy: null,
+      reviewedByName: null,
+      reviewedAt: null,
+      createdAt: new Date().toISOString(),
+    };
+    INCIDENT_REPORTS.unshift(incident);
+    return HttpResponse.json({ data: incident }, { status: 201 });
+  }),
+
+  // Product decision (2026-10) — a single OPEN -> REVIEWED flip; no workflow.
+  http.post(`${API}/incident-reports/:id/review`, ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN'])) {
+      return error(403, 'BUSINESS_ACCESS_DENIED', 'Only administrators can review incidents.');
+    }
+    const incident = INCIDENT_REPORTS.find((r) => r.id === params.id);
+    if (!incident) return error(404, 'RESOURCE_NOT_FOUND', 'Incident report not found.');
+    if (incident.status === 'REVIEWED') {
+      return error(422, 'INVALID_OPERATION', 'This incident has already been reviewed.');
+    }
+    incident.status = 'REVIEWED';
+    incident.reviewedBy = user.id;
+    incident.reviewedByName = `${user.firstName} ${user.lastName}`.trim();
+    incident.reviewedAt = new Date().toISOString();
+    return ok(incident);
+  }),
+
   /* ------------------------------------------------------- notifications */
 
   http.get(`${API}/notifications`, ({ request }) => {
@@ -1758,7 +2327,9 @@ export const handlers = [
     if (!requireRole(user, ['SUPER_ADMIN', 'ADMIN'])) {
       return error(403, 'BUSINESS_ACCESS_DENIED', 'Access denied.');
     }
-    return ok(buildAdminDashboard());
+    // doc 04 §76 — the branch switcher narrows the overview to one branch.
+    const branchId = scopeBranch(user, new URL(request.url).searchParams.get('branchId'));
+    return ok(buildAdminDashboard(branchId));
   }),
 
   http.get(`${API}/dashboard/manager`, ({ request }) => {

@@ -355,6 +355,16 @@ function AdjustmentDialog({
       : null;
   const wouldGoNegative = projected !== null && projected < 0;
 
+  /*
+    An adjustment posts to exactly one branch, and `stock` spans every branch
+    currently in view. Mapping it directly would list the same fuel type once
+    per branch — duplicating option keys and mislabelling the attached stock.
+  */
+  const branchStock = new Map<string, InventoryStock>();
+  for (const row of stock) {
+    if (row.branchId === branchId) branchStock.set(row.fuelTypeId, row);
+  }
+
   const mutation = useMutation({
     mutationFn: (values: AdjustmentValues) =>
       createAdjustment(toAdjustmentPayload(values, branchId)),
@@ -406,7 +416,7 @@ function AdjustmentDialog({
         <Select
           label="Fuel type"
           placeholder="Select a fuel type"
-          options={stock.map((s) => ({
+          options={[...branchStock.values()].map((s) => ({
             value: s.fuelTypeId,
             label: `${s.fuelTypeName} — ${formatLitres(s.currentQuantityLitres)}`,
           }))}

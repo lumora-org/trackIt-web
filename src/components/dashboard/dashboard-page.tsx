@@ -1,10 +1,12 @@
 'use client';
 
 import { AlertTriangle, Banknote, Building2, ClipboardCheck, Fuel, Package } from 'lucide-react';
+import Link from 'next/link';
 
 import { useAdminDashboard, useManagerDashboard } from '@/api/dashboard.api';
 import { CurrencyDisplay, QuantityDisplay } from '@/components/ui/amount';
-import { Badge, StatusBadge } from '@/components/ui/badge';
+import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader, CardTitle } from '@/components/ui/card';
 import { SectionHeading, StatCard } from '@/components/ui/stat-card';
 import { EmptyState, ErrorState, SkeletonCard } from '@/components/ui/states';
@@ -33,13 +35,15 @@ export function DashboardPage() {
 
 function AdminDashboardView() {
   const { user } = useAuth();
-  const { activeBusiness, activeBusinessId } = useBranchContext();
+  const { activeBranch, activeBusiness, activeBusinessId } = useBranchContext();
   // A SUPER_ADMIN scopes the overview through the business switcher; without a
-  // selection the API aggregates every business on the platform.
+  // selection the API aggregates every business on the platform. An ADMIN may
+  // narrow every figure to one branch through the branch switcher (doc 04 §76).
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const { data, isLoading, error, refetch } = useAdminDashboard(
     true,
     isSuperAdmin ? activeBusinessId : null,
+    activeBranch?.id ?? null,
   );
 
   if (error) return <ErrorState message={error.message} onRetry={() => refetch()} />;
@@ -58,7 +62,9 @@ function AdminDashboardView() {
               ? activeBusiness
                 ? `${activeBusiness.name} overview`
                 : 'Platform-wide overview across every business'
-              : 'Business-wide operational overview'}
+              : activeBranch
+                ? `${activeBranch.name} overview`
+                : 'Business-wide operational overview'}
           </p>
         </div>
         {user ? <Badge tone="brand">{fullName(user)}</Badge> : null}
@@ -178,7 +184,7 @@ function ManagerDashboardView() {
   if (error) return <ErrorState message={error.message} onRetry={() => refetch()} />;
 
   const inventory = data?.inventory ?? [];
-  const report = data?.dailyReport;
+  const salesRecorded = data?.salesRecordedToday;
 
   return (
     <div className="space-y-6">
@@ -206,20 +212,19 @@ function ManagerDashboardView() {
         />
       </div>
 
-      {report ? (
+      {salesRecorded === false ? (
         <Card>
           <CardHeader>
-            <CardTitle>Today&rsquo;s Daily Report</CardTitle>
-            <StatusBadge domain="dailyReport" value={report.status} />
+            <CardTitle>Today&rsquo;s sales not recorded yet</CardTitle>
           </CardHeader>
-          <CardBody>
+          <CardBody className="space-y-3">
             <p className="text-sm text-neutral-600">
-              {report.status === 'DRAFT'
-                ? 'Your daily report has not been submitted yet.'
-                : report.status === 'REJECTED'
-                  ? 'Your daily report was rejected. Update it and resubmit.'
-                  : `Your daily report is ${report.status.toLowerCase().replace(/_/g, ' ')}.`}
+              Record the branch&rsquo;s total litres sold for each fuel before the day
+              closes. Admin reports fill in automatically from what you record.
             </p>
+            <Link href="/sales" className={buttonVariants({ size: 'sm' })}>
+              Record today&rsquo;s sales
+            </Link>
           </CardBody>
         </Card>
       ) : null}

@@ -5,10 +5,13 @@
  * start inclusive, end exclusive (doc 08 §17) — and the backend guarantees they
  * never overlap for the same business + fuel type (doc 08 §20).
  *
- * doc 08 proposes `/history`, `/scheduled`, `/change` and `/:id/cancel`; doc 04
- * specifies only `/fuel-prices`, `/fuel-prices/current/:fuelTypeId` and
- * `POST /fuel-prices`. This module implements doc 04 and derives history and the
- * schedule by filtering the list endpoint. See ASSUMPTIONS.md §2.8.
+ * A price change takes effect immediately (product decision 2026-10): the
+ * server stamps the effective instant, so there is no scheduling and no date
+ * is ever sent from this client. doc 08 proposes `/history`, `/scheduled`,
+ * `/change` and `/:id/cancel`; doc 04 specifies only `/fuel-prices`,
+ * `/fuel-prices/current/:fuelTypeId` and `POST /fuel-prices`. This module
+ * implements doc 04 and derives history by filtering the list endpoint.
+ * See ASSUMPTIONS.md §2.8.
  */
 import { z } from 'zod';
 
@@ -76,44 +79,25 @@ export function applicablePrice<T extends FuelPrice>(
   );
 }
 
-/** doc 08 §26 / §47 — a price whose effectiveFrom is in the future. */
-export function isScheduled(price: FuelPrice, now: Date = new Date()): boolean {
-  return +new Date(price.effectiveFrom) > now.getTime();
-}
-
 /**
  * doc 08 §71 — `@IsPositive()`: price must be greater than 0.
- * doc 08 §27 — backdating is not allowed through the normal UI, so the form
- * refuses a past date even though the API does not forbid it.
+ * Product decision 2026-10 — changes are immediate, so there is deliberately
+ * no effective date on the form or in the payload.
  */
-export const createFuelPriceSchema = z
-  .object({
-    fuelTypeId: z.string().uuid('Select a fuel type'),
-    pricePerLitre: z
-      .number({ message: 'Enter a price' })
-      .positive('Price must be greater than 0')
-      .max(1_000_000, 'Price looks too high'),
-    effectiveFrom: z.string().min(1, 'Effective date is required'),
-  })
-  .refine(
-    (v) => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      return +new Date(v.effectiveFrom) >= +today;
-    },
-    {
-      message: 'Backdated prices are not allowed. Choose today or a future date.',
-      path: ['effectiveFrom'],
-    },
-  );
+export const createFuelPriceSchema = z.object({
+  fuelTypeId: z.string().uuid('Select a fuel type'),
+  pricePerLitre: z
+    .number({ message: 'Enter a price' })
+    .positive('Price must be greater than 0')
+    .max(1_000_000, 'Price looks too high'),
+});
 
 export type CreateFuelPriceInput = z.infer<typeof createFuelPriceSchema>;
 
-/** doc 04 §31 — the backend closes the previous interval and creates this one. */
+/** doc 04 §31 — the server closes the previous interval and opens this one now. */
 export async function createFuelPrice(input: CreateFuelPriceInput): Promise<FuelPrice> {
   return apiClient.post<FuelPrice>('/fuel-prices', {
     fuelTypeId: input.fuelTypeId,
     pricePerLitre: input.pricePerLitre,
-    effectiveFrom: new Date(input.effectiveFrom).toISOString(),
   });
 }

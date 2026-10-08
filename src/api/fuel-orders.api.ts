@@ -43,7 +43,8 @@ export async function getFuelOrder(id: string): Promise<FuelOrder> {
 /**
  * doc 04 §41 — exactly five top-level fields. `businessId` is absent because the
  * backend derives it, and `status` is absent because an order is always created
- * as DRAFT.
+ * as DRAFT. `tankerId` is optional (product decision, 2026-10): attach it now
+ * when known, otherwise dispatch sets it when the order goes IN_TRANSIT.
  */
 export async function createFuelOrder(input: CreateFuelOrderInput): Promise<FuelOrder> {
   return apiClient.post<FuelOrder>(
@@ -52,6 +53,7 @@ export async function createFuelOrder(input: CreateFuelOrderInput): Promise<Fuel
       supplierId: input.supplierId,
       destinationBranchId: input.destinationBranchId,
       expectedDeliveryAt: new Date(input.expectedDeliveryAt).toISOString(),
+      tankerId: input.tankerId ? input.tankerId : undefined,
       notes: input.notes ? input.notes : undefined,
       items: input.items.map((item) => ({
         fuelTypeId: item.fuelTypeId,
@@ -102,6 +104,8 @@ export const createFuelOrderSchema = z.object({
   supplierId: z.string().uuid('Select a supplier'),
   destinationBranchId: z.string().uuid('Select a destination branch'),
   expectedDeliveryAt: z.string().min(1, 'Expected delivery date is required'),
+  /** Optional (product decision, 2026-10) — '' means "not assigned yet". */
+  tankerId: z.union([z.literal(''), z.string().uuid()]).optional(),
   notes: z.string().trim().max(1000, 'Notes are too long').optional(),
   items: z
     .array(orderItemSchema)

@@ -135,7 +135,7 @@ export function DeliveriesPage() {
         onPageChange={setPage}
         onRowClick={(row) => setSelectedId(row.id)}
         emptyTitle="No deliveries yet"
-        emptyDescription="Deliveries appear here once a tanker arrives for one of your fuel orders."
+        emptyDescription="Deliveries appear here as soon as a fuel order is placed for a branch. Receiving one moves its fuel into stock."
         emptyIcon={Truck}
       />
 

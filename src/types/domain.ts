@@ -324,6 +324,26 @@ export interface InventorySummary {
 
 /* ------------------------------------------------------------------ sales */
 
+/**
+ * Product decision (2026-10) — how a sale row came to exist:
+ *   SINGLE    = one counter transaction
+ *   DAY_TOTAL = the manager's running total for one business day
+ */
+export const SALE_RECORD_MODES = ['SINGLE', 'DAY_TOTAL'] as const;
+export type SaleRecordMode = (typeof SALE_RECORD_MODES)[number];
+
+/**
+ * Product decision (2026-10) — the admin confirmation gate on a recorded sale:
+ *   PENDING  = a manager recorded the figure; an admin must confirm it
+ *   APPROVED = confirmed by an admin (or recorded by one, or predates the gate)
+ *   REJECTED = refused with a reason; the manager revises, returning it to PENDING
+ *
+ * Approval is workflow metadata, never accounting: the litres and amount count
+ * exactly the same whatever the status.
+ */
+export const SALE_APPROVAL_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type SaleApprovalStatus = (typeof SALE_APPROVAL_STATUSES)[number];
+
 export interface Sale {
   id: string;
   /** Format `SALE-2026-000001`, unique per business (doc 03 §53). */
@@ -336,6 +356,13 @@ export interface Sale {
   unitPrice: number;
   /** litresSold × unitPrice — computed by the backend only. */
   totalAmount: number;
+  /** Absent on legacy rows in the wild; treat as SINGLE. */
+  recordMode?: SaleRecordMode;
+  /** Absent on legacy rows; the gate backfills them APPROVED. */
+  approvalStatus?: SaleApprovalStatus;
+  approvedAt?: string | null;
+  /** Why an admin refused the figure; drives the manager's revision. */
+  rejectionReason?: string | null;
   soldAt: string;
   voidedAt?: string | null;
   voidReason?: string | null;
@@ -393,6 +420,60 @@ export interface DailyReport {
   rejectionReason?: string | null;
 }
 
+/* ---------------------------------------------- daily sales roll-up (admin) */
+
+/** Per-fuel split of one (day, branch) roll-up row. */
+export interface DailySalesFuelBreakdown {
+  fuelTypeId: string;
+  fuelTypeName?: string;
+  litresSold: number;
+  revenue: number;
+}
+
+/**
+ * GET /daily-reports/summary (product decision, 2026-10) — the destination
+ * for every manager sale record: one row per (business day, branch) with the
+ * day's aggregate, its per-fuel split and the branch's incident counts.
+ */
+export interface DailySalesSummaryRow {
+  /** Business-timezone calendar day, e.g. "2026-10-06". */
+  date: string;
+  businessId: string;
+  businessName?: string;
+  branchId: string;
+  branchName?: string;
+  /** Non-voided sale records for the day. */
+  saleCount: number;
+  totalLitres: number;
+  totalRevenue: number;
+  incidentCount: number;
+  openIncidentCount: number;
+  fuels: DailySalesFuelBreakdown[];
+}
+
+/* -------------------------------------------------------- incident reports */
+
+/** Product decision (2026-10) — the manager's free-text exception log. */
+export const INCIDENT_STATUSES = ['OPEN', 'REVIEWED'] as const;
+export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
+
+export interface IncidentReport {
+  id: string;
+  branchId: string;
+  branchName?: string;
+  /** Bare DATE, e.g. "2026-10-06". */
+  incidentDate: string;
+  title: string;
+  description: string;
+  status: IncidentStatus;
+  reportedBy: string | null;
+  reportedByName?: string | null;
+  reviewedBy: string | null;
+  reviewedByName?: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
 /* ---------------------------------------------------------- notifications */
 
 /** doc 03 §19 — exact enum. */
@@ -405,7 +486,14 @@ export const NOTIFICATION_TYPES = [
   'LOW_INVENTORY',
   'FUEL_PRICE_UPDATE',
   'DELIVERY_IN_TRANSIT',
+  'FUEL_ORDER_ASSIGNED',
   'DAILY_REPORT_MISSING',
+  'INCIDENT_REPORTED',
+  'INCIDENT_REVIEWED',
+  'SALE_RECORDED',
+  'SALE_APPROVED',
+  'SALE_REJECTED',
+  'SALES_NOT_RECORDED',
   'SYSTEM',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -448,7 +536,7 @@ export interface AdminDashboard {
   }>;
 }
 
-/** doc 04 §77 */
+/** doc 04 §77, reshaped by the day-total decision (2026-10) */
 export interface ManagerDashboard {
   branch: EntityRef;
   inventory: InventoryStock[];
@@ -456,9 +544,8 @@ export interface ManagerDashboard {
     litresSold: number;
     revenue: number;
   };
-  dailyReport: {
-    status: DailyReportStatus;
-  } | null;
+  /** Whether any sale has been recorded for today's business day. */
+  salesRecordedToday: boolean;
 }
 
 /* ------------------------------------------------------------- audit logs */
@@ -488,6 +575,10 @@ export const AUDIT_ACTIONS = [
   'INVENTORY_ADJUSTED',
   'SALE_CREATED',
   'SALE_VOIDED',
+  'SALE_DAY_TOTAL_RECORDED',
+  'SALE_DAY_TOTAL_CORRECTED',
+  'INCIDENT_REPORT_CREATED',
+  'INCIDENT_REPORT_REVIEWED',
   'DAILY_REPORT_CREATED',
   'DAILY_REPORT_SUBMITTED',
   'DAILY_REPORT_APPROVED',
