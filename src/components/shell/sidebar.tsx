@@ -1,7 +1,8 @@
 'use client';
 
-import { Fuel, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
+import { Logo } from '@/components/shared/logo';
 import { PROFILE_ITEM, visibleGroups, type NavItem } from '@/lib/navigation';
 import { cn } from '@/lib/cn';
 import type { UserRole } from '@/types/domain';
@@ -60,9 +61,7 @@ export function Sidebar({
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-neutral-200 bg-surface lg:flex">
       <div className="flex items-center gap-2.5 border-b border-neutral-200 px-4 py-4">
-        <span className="bg-brand-600 flex size-9 shrink-0 items-center justify-center rounded-xl text-white">
-          <Fuel className="size-5" aria-hidden="true" />
-        </span>
+        <Logo size={36} className="ring-1 ring-neutral-200" />
         <div className="min-w-0">
           <p className="truncate text-sm font-bold text-neutral-900">TrackIt</p>
           <p className="truncate text-xs text-neutral-500">

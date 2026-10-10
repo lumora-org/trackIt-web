@@ -8,6 +8,8 @@ const eslintConfig = [
       'node_modules/**',
       'coverage/**',
       'next-env.d.ts',
+      // Service worker runs outside the app bundle with SW-only globals (self, caches).
+      'public/sw.js',
       // Mock fixtures intentionally fabricate API payloads.
       'src/mocks/**',
     ],

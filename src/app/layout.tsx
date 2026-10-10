@@ -11,12 +11,29 @@ export const metadata: Metadata = {
   },
   description: 'Multi-branch fuel station management for K.B.Y GLOBAL INVESTMENT.',
   applicationName: 'TrackIt',
+  manifest: '/manifest.webmanifest',
+  icons: {
+    icon: [
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'TrackIt',
+  },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   // Zoom is intentionally NOT disabled (PROMPT.md §26 accessibility).
+  // `viewport-fit=cover` lets the installed PWA extend into display cutouts so
+  // the `safe-top` / `safe-bottom` padding utilities resolve to real insets.
+  viewportFit: 'cover',
   themeColor: '#15803d',
 };
 

@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 
+import { Logo } from '@/components/shared/logo';
 import { useAuth } from '@/providers/auth-provider';
 
 /**
@@ -26,10 +27,13 @@ export default function Home() {
     <div
       role="status"
       aria-live="polite"
-      className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-neutral-50"
+      className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-neutral-50"
     >
-      <Loader2 className="text-brand-600 size-7 animate-spin" aria-hidden="true" />
-      <p className="text-sm text-neutral-600">Opening TrackIt&hellip;</p>
+      <Logo size={72} priority className="shadow-sm ring-1 ring-neutral-200" />
+      <div className="flex items-center gap-3">
+        <Loader2 className="text-brand-600 size-5 animate-spin" aria-hidden="true" />
+        <p className="text-sm text-neutral-600">Opening TrackIt&hellip;</p>
+      </div>
     </div>
   );
 }
