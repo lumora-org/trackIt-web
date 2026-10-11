@@ -94,6 +94,8 @@ export const queryKeys = {
   notifications: {
     list: (filters?: QueryFilters) => ['notifications', 'list', filters ?? {}] as const,
     unreadCount: ['notifications', 'unread-count'] as const,
+    /** GET /notifications/push — server capability plus this account's devices. */
+    pushStatus: ['notifications', 'push-status'] as const,
   },
 
   auditLogs: {

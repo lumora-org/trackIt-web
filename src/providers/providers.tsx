@@ -11,6 +11,7 @@ import { env } from '@/lib/env';
 import { MockApiProvider } from './mock-api-provider';
 import { AuthProvider } from './auth-provider';
 import { OfflineWorker } from './offline-worker';
+import { PushProvider } from './push-provider';
 import { ThemeProvider } from './theme-provider';
 
 function makeQueryClient(): QueryClient {
@@ -49,7 +50,10 @@ export function Providers({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <MockApiProvider>
-          <AuthProvider>{children}</AuthProvider>
+          {/* Inside AuthProvider: the push opt-in is per signed-in account. */}
+          <AuthProvider>
+            <PushProvider>{children}</PushProvider>
+          </AuthProvider>
         </MockApiProvider>
       </ThemeProvider>
       {env.isDev ? <ReactQueryDevtools initialIsOpen={false} /> : null}

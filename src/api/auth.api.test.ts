@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
-import { configureApiClient, resetApiClientForTests, setAccessToken } from './client';
+import { configureApiClient, getAccessToken, resetApiClientForTests, setAccessToken } from './client';
 import { getCurrentUser, login, loginSchema } from './auth.api';
 import { BUSINESS_ID, BRANCHES, USERS } from '@/mocks/data';
 import { server } from '@/mocks/server';
@@ -107,5 +107,27 @@ describe('authenticated requests', () => {
     resetApiClientForTests();
     setAccessToken(null);
     await expect(getCurrentUser()).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  /**
+   * The complaint this whole flow exists to answer: reloading the page must not
+   * sign anybody out. The access token only lives in memory, so a reload starts
+   * with none and `/auth/me` has to be rescued by the refresh session.
+   */
+  it('restores the session on a reload through the refresh endpoint', async () => {
+    resetApiClientForTests();
+    configureApiClient({ baseUrl: '' });
+    const session = await login({ email: 'admin@kbyglobal.com', password: 'Password123!' });
+    setAccessToken(session.accessToken);
+    expect((await getCurrentUser()).email).toBe('admin@kbyglobal.com');
+
+    // The reload itself: memory is cleared, the cookie session is not.
+    setAccessToken(null);
+
+    const restored = await getCurrentUser();
+    expect(restored.email).toBe('admin@kbyglobal.com');
+    expect(restored.role).toBe('ADMIN');
+    // And the recovered token stays in memory for every later request.
+    expect(getAccessToken()).toContain(encodeURIComponent('admin@kbyglobal.com'));
   });
 });

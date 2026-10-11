@@ -514,6 +514,23 @@ export interface AppNotification {
   readAt: string | null;
 }
 
+/**
+ * PWA push: one device the caller registered for alerts. Only the id and date
+ * ever leave the server — an endpoint URL or an encryption key must not be
+ * readable from any response.
+ */
+export interface PushSubscriptionSummary {
+  id: string;
+  createdAt: string;
+}
+
+export interface PushStatus {
+  /** False when the backend has no VAPID key pair; the toggle then hides itself. */
+  enabled: boolean;
+  applicationServerKey: string | null;
+  subscriptions: PushSubscriptionSummary[];
+}
+
 /* -------------------------------------------------------------- dashboard */
 
 /** doc 04 §76 */

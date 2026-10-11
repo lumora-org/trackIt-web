@@ -2,8 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import { login } from '@/api/auth.api';
 import { resetApiClientForTests, setAccessToken } from '@/api/client';
-import { listNotifications, markAllAsRead, markAsRead, unreadCount } from '@/api/notifications.api';
-import { NOTIFICATIONS } from '@/mocks/data';
+import {
+  getPushStatus,
+  listNotifications,
+  markAllAsRead,
+  markAsRead,
+  registerPushSubscription,
+  removeAllPushSubscriptions,
+  removePushSubscription,
+  sendTestPush,
+  unreadCount,
+} from '@/api/notifications.api';
+import { NOTIFICATIONS, PUSH_SUBSCRIPTIONS } from '@/mocks/data';
 
 async function asAdmin() {
   resetApiClientForTests();
@@ -72,11 +82,66 @@ describe('marking as read (doc 04 §73)', () => {
   });
 });
 
+describe('push subscriptions (PWA alerts)', () => {
+  const subscription = {
+    endpoint: 'mock://trackit/device-1',
+    keys: { p256dh: 'MOCK_P256DH', auth: 'MOCK_AUTH' },
+  };
+
+  it('reports the key the browser needs and no devices yet', async () => {
+    await asAdmin();
+    const status = await getPushStatus();
+    expect(status.enabled).toBe(true);
+    expect(status.applicationServerKey).toBeTruthy();
+    expect(status.subscriptions).toHaveLength(0);
+  });
+
+  it('registers a device and keeps one row when it re-registers', async () => {
+    await asAdmin();
+    const first = await registerPushSubscription(subscription);
+    expect(first.created).toBe(true);
+
+    const second = await registerPushSubscription(subscription);
+    expect(second).toEqual({ id: first.id, created: false });
+    expect(PUSH_SUBSCRIPTIONS).toHaveLength(1);
+
+    const status = await getPushStatus();
+    expect(status.subscriptions.map((s) => s.id)).toEqual([first.id]);
+    // A device record never exposes its endpoint or keys (write-only).
+    expect(JSON.stringify(status)).not.toContain('MOCK_P256DH');
+  });
+
+  it('counts the registered devices for a test alert', async () => {
+    await asAdmin();
+    expect((await sendTestPush()).sent).toBe(0);
+    await registerPushSubscription(subscription);
+    expect((await sendTestPush()).sent).toBe(1);
+  });
+
+  it('unsubscribes one device, and all of them on sign-out', async () => {
+    await asAdmin();
+    const { id } = await registerPushSubscription(subscription);
+    await removePushSubscription(id);
+    expect(await getPushStatus()).toMatchObject({ subscriptions: [] });
+
+    await registerPushSubscription(subscription);
+    await registerPushSubscription({ ...subscription, endpoint: 'mock://trackit/device-2' });
+    await removeAllPushSubscriptions();
+    expect(PUSH_SUBSCRIPTIONS).toHaveLength(0);
+  });
+});
+
 describe('notification security', () => {
   it('requires authentication', async () => {
     resetApiClientForTests();
     setAccessToken(null);
     await expect(listNotifications()).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('requires authentication for the push routes too', async () => {
+    resetApiClientForTests();
+    setAccessToken(null);
+    await expect(getPushStatus()).rejects.toMatchObject({ statusCode: 401 });
   });
 
   it('404s for an unknown notification rather than leaking', async () => {

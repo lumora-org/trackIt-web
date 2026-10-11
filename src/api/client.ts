@@ -175,6 +175,20 @@ export interface RequestOptions {
  */
 let refreshInFlight: Promise<boolean> | null = null;
 
+/**
+ * Endpoints where a 401 is the endpoint's own verdict on the credentials that
+ * were just sent — a wrong password, a spent reset link. Refreshing there would
+ * rotate the session for nothing and, worse, bury that precise message under a
+ * generic "sign in again".
+ *
+ * Everything else gets the refresh-and-retry treatment, and `GET /auth/me`
+ * deliberately included is the point: the access token lives in memory only, so
+ * after a page reload it is gone and the httpOnly refresh cookie is the *only*
+ * thing that can restore the session. Excluding all of `/auth/*` used to make
+ * every hard refresh log the user straight back out.
+ */
+const TERMINAL_401_PATHS = new Set(['/auth/login', '/auth/reset-password', '/auth/change-password']);
+
 async function attemptRefresh(): Promise<boolean> {
   refreshInFlight ??= (async () => {
     try {
@@ -264,9 +278,11 @@ async function execute(path: string, options: RequestOptions): Promise<unknown> 
     const apiError = toApiError(err, path);
     if (apiError.isCanceled) throw apiError;
 
-    const isAuthPath = path.startsWith('/auth/');
     const canRefresh =
-      apiError.isUnauthorized && !options.isRetry && !options.skipAuth && !isAuthPath;
+      apiError.isUnauthorized &&
+      !options.isRetry &&
+      !options.skipAuth &&
+      !TERMINAL_401_PATHS.has(path);
 
     if (canRefresh) {
       const recovered = await attemptRefresh();

@@ -1044,6 +1044,39 @@ export function buildManagerDashboard(branchId: string): ManagerDashboard {
   };
 }
 
+/* ---------------------------------------------------------------- push */
+
+/**
+ * Simulated PWA push registry — the stand-in for the real `push_subscriptions`
+ * table. MSW's worker cannot receive push, so the UI labels alerts "simulated"
+ * while this keeps the whole opt-in flow (register, list, unsubscribe, test)
+ * clickable in demo mode.
+ */
+export interface MockPushSubscription {
+  id: string;
+  userId: string;
+  endpoint: string;
+  createdAt: string;
+}
+
+export const PUSH_SUBSCRIPTIONS: MockPushSubscription[] = [];
+
+/**
+ * Placeholder VAPID key. `lib/push.ts` never calls PushManager.subscribe() while
+ * the mock API is active, so it only has to look like a url-safe base64 key.
+ */
+export const MOCK_VAPID_PUBLIC_KEY = 'BDH0MizdK8FvzKqRm2N9xYwT7pLsQvUcJeGhBnMdAfKz';
+
+/**
+ * Stand-in for the httpOnly `kby_refresh_token` cookie: MSW's browser handlers
+ * run inside the page and cannot read an httpOnly cookie back, so the mock
+ * remembers here whose session is live. Page state is wiped by a reload, so
+ * `handlers.ts` mirrors this value into localStorage — that is what gives the
+ * demo the reload survival the real cookie gives a deployed user.
+ * `resetMockData()` clears it between tests.
+ */
+export const MOCK_SESSION: { email: string | null } = { email: null };
+
 /* ------------------------------------------------------------ test reset */
 
 /**
@@ -1064,6 +1097,7 @@ const MUTABLE_COLLECTIONS = {
   DAILY_REPORTS,
   INCIDENT_REPORTS,
   NOTIFICATIONS,
+  PUSH_SUBSCRIPTIONS,
   AUDIT_LOGS,
   USERS,
   FUEL_PRICES,
@@ -1077,6 +1111,10 @@ const PRISTINE = Object.fromEntries(
 ) as Record<keyof typeof MUTABLE_COLLECTIONS, unknown[]>;
 
 export function resetMockData(): void {
+  // Not a collection, but the same rule applies: a signed-in demo session must
+  // not leak into the next test.
+  MOCK_SESSION.email = null;
+
   for (const key of Object.keys(MUTABLE_COLLECTIONS) as Array<keyof typeof MUTABLE_COLLECTIONS>) {
     const target = MUTABLE_COLLECTIONS[key] as unknown[];
     target.length = 0;

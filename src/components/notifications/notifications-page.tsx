@@ -28,6 +28,7 @@ import { Badge, toneFor } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { FilterSelect } from '@/components/shared/search-input';
+import { PushAlertsToggle } from '@/components/notifications/push-toggle';
 import { cn } from '@/lib/cn';
 import { formatRelative } from '@/lib/format';
 import { queryKeys } from '@/lib/query-keys';
@@ -41,7 +42,8 @@ import type { AppNotification, NotificationStatus, NotificationType } from '@/ty
  * the related resource.
  *
  * There is no notification preferences model anywhere in the docs (no table, no
- * endpoint), so no opt-out UI is offered — see ASSUMPTIONS.md §3.11.
+ * endpoint), so no per-type opt-out is offered — see ASSUMPTIONS.md §3.11. The
+ * device-level push opt-in is separate and lives in `PushAlertsToggle`.
  */
 
 /** doc 03 §19 — notification_type enum, mapped to a recognisable icon. */
@@ -74,6 +76,7 @@ const RESOURCE_ROUTES: Record<string, (id: string) => string> = {
   DAILY_REPORT: (id) => `/daily-reports?report=${id}`,
   INCIDENT_REPORT: (id) => `/daily-reports?incident=${id}`,
   DELIVERY: (id) => `/deliveries?delivery=${id}`,
+  FUEL_ORDER: () => '/fuel-orders',
   BRANCH: () => '/inventory',
   FUEL_PRICE: () => '/fuel-prices',
   SALE: () => '/sales',
@@ -183,17 +186,20 @@ export function NotificationsPage() {
             Price updates, delivery activity, incident reports and stock warnings.
           </p>
         </div>
-        {unread > 0 ? (
-          <Button
-            variant="outline"
-            loading={readAllMutation.isPending}
-            loadingText="Marking read"
-            onClick={() => readAllMutation.mutate()}
-          >
-            <CheckCheck className="size-4" aria-hidden="true" />
-            Mark all as read
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <PushAlertsToggle />
+          {unread > 0 ? (
+            <Button
+              variant="outline"
+              loading={readAllMutation.isPending}
+              loadingText="Marking read"
+              onClick={() => readAllMutation.mutate()}
+            >
+              <CheckCheck className="size-4" aria-hidden="true" />
+              Mark all as read
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       <div className="flex flex-col gap-3 sm:flex-row">

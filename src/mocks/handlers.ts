@@ -40,7 +40,10 @@ import {
   INCIDENT_REPORTS,
   INVENTORY_STOCK,
   INVENTORY_TRANSACTIONS,
+  MOCK_SESSION,
+  MOCK_VAPID_PUBLIC_KEY,
   NOTIFICATIONS,
+  PUSH_SUBSCRIPTIONS,
   SALES,
   SUPPLIERS,
   TANKERS,
@@ -142,6 +145,30 @@ if (typeof window !== 'undefined') {
     const stored = window.localStorage.getItem(`${AVATAR_STORAGE_PREFIX}${seeded.id}`);
     if (stored) seeded.avatarUrl = stored;
   }
+}
+
+/*
+ * The demo session, mirrored into localStorage for the same reason avatars are:
+ * the mock store is rebuilt on every page load. MSW cannot hand the browser a
+ * real httpOnly cookie, so without this the demo would log itself out on every
+ * refresh — the exact bug the real API's refresh cookie fixes, and the reason
+ * the avatar comment above could promise that a reload keeps you signed in.
+ */
+const SESSION_STORAGE_KEY = 'trackit-mock-session';
+
+function persistSession(email: string | null): void {
+  MOCK_SESSION.email = email;
+  if (typeof window === 'undefined') return;
+  try {
+    if (email) window.localStorage.setItem(SESSION_STORAGE_KEY, email);
+    else window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Storage may be unavailable; the in-memory session still applies.
+  }
+}
+
+if (typeof window !== 'undefined') {
+  MOCK_SESSION.email = window.localStorage.getItem(SESSION_STORAGE_KEY);
 }
 
 /** doc 04 §89 */
@@ -263,6 +290,9 @@ export const handlers = [
     }
 
     const token = `${MOCK_ACCESS_TOKEN}.${encodeURIComponent(user.email)}`;
+    // Remember the session the way the real backend remembers it in the
+    // httpOnly cookie, so a reload can be re-authenticated (see MOCK_SESSION).
+    persistSession(user.email);
     // The refresh token is set as an httpOnly cookie so the browser's JS can
     // never read it (PROMPT.md §21).
     return HttpResponse.json(
@@ -282,16 +312,28 @@ export const handlers = [
     );
   }),
 
-  http.post(`${API}/auth/refresh`, ({ request }) => {
-    const refresh = request.headers.get('Authorization') ?? '';
-    void refresh;
-    // The mock has no session table; the refresh cookie is the only gate.
+  http.post(`${API}/auth/refresh`, () => {
+    // The mock has no session table, so MOCK_SESSION stands in for the refresh
+    // cookie: with no live session the refresh is refused exactly as the real
+    // API refuses an unknown or revoked token, and the caller must sign in.
+    if (!MOCK_SESSION.email) {
+      return error(401, 'AUTH_REFRESH_TOKEN_INVALID', 'The refresh token is not valid.');
+    }
+    // The replacement token has to carry the same identity the login token did,
+    // or the request retried after the refresh would still be anonymous.
     return HttpResponse.json({
-      data: { accessToken: MOCK_ACCESS_TOKEN, refreshToken: MOCK_REFRESH_TOKEN, expiresIn: 900 },
+      data: {
+        accessToken: `${MOCK_ACCESS_TOKEN}.${encodeURIComponent(MOCK_SESSION.email)}`,
+        refreshToken: MOCK_REFRESH_TOKEN,
+        expiresIn: 900,
+      },
     });
   }),
 
-  http.post(`${API}/auth/logout`, () => new HttpResponse(null, { status: 204 })),
+  http.post(`${API}/auth/logout`, () => {
+    persistSession(null);
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   http.post(`${API}/auth/logout-all`, () => new HttpResponse(null, { status: 204 })),
 
@@ -2298,6 +2340,91 @@ export const handlers = [
     rows.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
     const { slice, meta } = paginate(rows, url);
     return ok(slice, meta);
+  }),
+
+  /* ---------------------------------------------------------------- push */
+  /*
+   * Simulated counterpart of the real push endpoints. Declared before
+   * `notifications/:id/read` for the same static-vs-param reason as
+   * `read-all`. Push itself cannot reach the MSW worker, so these only manage
+   * the registry the toggle reads; `lib/push.ts` renders the alerts in-page.
+   */
+
+  http.get(`${API}/notifications/push`, ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    return ok({
+      enabled: true,
+      applicationServerKey: MOCK_VAPID_PUBLIC_KEY,
+      subscriptions: PUSH_SUBSCRIPTIONS.filter((s) => s.userId === user.id).map((s) => ({
+        id: s.id,
+        createdAt: s.createdAt,
+      })),
+    });
+  }),
+
+  http.post(`${API}/notifications/push/subscriptions`, async ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+
+    const body = (await request.json()) as {
+      endpoint?: string;
+      keys?: { p256dh?: string; auth?: string };
+    };
+    const fieldErrors: ApiFieldError[] = [];
+    if (!body.endpoint) fieldErrors.push({ field: 'endpoint', message: 'endpoint is required' });
+    if (!body.keys?.p256dh) {
+      fieldErrors.push({ field: 'keys.p256dh', message: 'keys.p256dh is required' });
+    }
+    if (!body.keys?.auth) fieldErrors.push({ field: 'keys.auth', message: 'keys.auth is required' });
+    if (fieldErrors.length > 0) {
+      return error(400, 'VALIDATION_ERROR', 'Validation failed', fieldErrors);
+    }
+
+    // Idempotent on endpoint, exactly like the real upsert.
+    const existing = PUSH_SUBSCRIPTIONS.find((s) => s.endpoint === body.endpoint);
+    if (existing) {
+      // The device now belongs to whoever registered it last (shared device).
+      existing.userId = user.id;
+      existing.createdAt = new Date().toISOString();
+      return ok({ id: existing.id, created: false });
+    }
+
+    const created = {
+      id: crypto.randomUUID(),
+      userId: user.id,
+      endpoint: body.endpoint!,
+      createdAt: new Date().toISOString(),
+    };
+    PUSH_SUBSCRIPTIONS.unshift(created);
+    return ok({ id: created.id, created: true });
+  }),
+
+  // Static sibling of the :id route — must stay ahead of it.
+  http.delete(`${API}/notifications/push/subscriptions/all`, ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    for (let index = PUSH_SUBSCRIPTIONS.length - 1; index >= 0; index -= 1) {
+      if (PUSH_SUBSCRIPTIONS[index]!.userId === user.id) PUSH_SUBSCRIPTIONS.splice(index, 1);
+    }
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete(`${API}/notifications/push/subscriptions/:id`, ({ request, params }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    const index = PUSH_SUBSCRIPTIONS.findIndex(
+      (s) => s.id === params.id && s.userId === user.id,
+    );
+    // A foreign id deletes nothing and still answers 204, as the real API does.
+    if (index >= 0) PUSH_SUBSCRIPTIONS.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post(`${API}/notifications/push/test`, ({ request }) => {
+    const user = requireAuth(request);
+    if (!user) return error(401, 'AUTH_TOKEN_EXPIRED', 'Authentication required.');
+    return ok({ sent: PUSH_SUBSCRIPTIONS.filter((s) => s.userId === user.id).length });
   }),
 
   http.patch(`${API}/notifications/:id/read`, ({ request, params }) => {

@@ -10,6 +10,7 @@ import {
   unwrapEnvelope,
   apiClient,
 } from './client';
+import { ApiError } from './errors';
 
 describe('buildQuery', () => {
   it('serialises primitives and skips empties', () => {
@@ -158,5 +159,143 @@ describe('apiClient authorization', () => {
 
     await apiClient.post('/sales', { litresSold: 100 }, { idempotencyKey: 'key-abc' });
     expect(seen).toBe('key-abc');
+  });
+});
+
+/**
+ * Session recovery after a page reload.
+ *
+ * The access token is memory-only, so F5 always starts with none and the first
+ * `/auth/me` always 401s. The httpOnly refresh cookie is the only thing that can
+ * bring the session back — which is exactly what used to be blocked by skipping
+ * the refresh for every `/auth/*` path, logging the user out on each reload.
+ */
+describe('401 refresh-and-retry', () => {
+  interface Call {
+    path: string;
+    auth: string | null;
+  }
+
+  const unauthorized = {
+    statusCode: 401,
+    code: 'AUTH_TOKEN_EXPIRED',
+    message: 'Your session has expired. Please sign in again.',
+  };
+
+  /** Routes by API path (prefix stripped) and records every call made. */
+  function recordingFetch(
+    route: (path: string, auth: string | null) => { status: number; body?: unknown },
+    calls: Call[],
+  ): typeof fetch {
+    return async (input, init) => {
+      const path = new URL(String(input)).pathname.replace(/^\/api\/v1/, '');
+      const auth = new Headers(init?.headers as HeadersInit).get('Authorization');
+      calls.push({ path, auth });
+      const res = route(path, auth);
+      return new Response(res.body === undefined ? null : JSON.stringify(res.body), {
+        status: res.status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+  }
+
+  it('re-establishes the session on a hard refresh instead of logging out', async () => {
+    resetApiClientForTests();
+    const calls: Call[] = [];
+    configureApiClient({
+      baseUrl: 'http://api.test',
+      onSessionExpired: undefined,
+      fetchImpl: recordingFetch((path, auth) => {
+        if (path === '/auth/refresh') {
+          return { status: 200, body: { data: { accessToken: 'fresh-token', expiresIn: 900 } } };
+        }
+        if (path === '/auth/me') {
+          return auth === 'Bearer fresh-token'
+            ? { status: 200, body: { data: { id: 'u1', email: 'manager@kbyglobal.com' } } }
+            : { status: 401, body: unauthorized };
+        }
+        return { status: 200, body: { data: null } };
+      }, calls),
+    });
+
+    // No access token in memory: the exact state of a reloaded tab.
+    const user = await apiClient.get<{ id: string }>('/auth/me');
+
+    expect(user).toEqual({ id: 'u1', email: 'manager@kbyglobal.com' });
+    expect(calls.map((call) => call.path)).toEqual(['/auth/me', '/auth/refresh', '/auth/me']);
+    expect(getAccessToken()).toBe('fresh-token');
+  });
+
+  it('shares a single refresh between concurrent 401s', async () => {
+    resetApiClientForTests();
+    const calls: Call[] = [];
+    configureApiClient({
+      baseUrl: 'http://api.test',
+      onSessionExpired: undefined,
+      fetchImpl: recordingFetch((path, auth) => {
+        if (path === '/auth/refresh') {
+          return { status: 200, body: { data: { accessToken: 'fresh-token' } } };
+        }
+        // Only the replayed request, carrying the new token, is allowed through.
+        return auth === 'Bearer fresh-token'
+          ? { status: 200, body: { data: [] } }
+          : { status: 401, body: unauthorized };
+      }, calls),
+    });
+
+    setAccessToken('stale-token');
+    await Promise.all([apiClient.get('/notifications'), apiClient.list('/sales')]);
+
+    expect(calls.filter((call) => call.path === '/auth/refresh')).toHaveLength(1);
+  });
+
+  it('never refreshes when the endpoint itself rejected the credentials', async () => {
+    resetApiClientForTests();
+    const calls: Call[] = [];
+    configureApiClient({
+      baseUrl: 'http://api.test',
+      onSessionExpired: undefined,
+      fetchImpl: recordingFetch((path) => {
+        if (path === '/auth/login') {
+          return {
+            status: 401,
+            body: { ...unauthorized, code: 'AUTH_INVALID_CREDENTIALS', message: 'Invalid email or password.' },
+          };
+        }
+        return { status: 200, body: { data: null } };
+      }, calls),
+    });
+
+    // A wrong password must keep saying "invalid email or password", not quietly
+    // rotate the session and re-POST the credentials.
+    const err: unknown = await apiClient
+      .post('/auth/login', { email: 'a@b.com', password: 'wrong' })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message).toBe('Invalid email or password.');
+    expect(calls.map((call) => call.path)).toEqual(['/auth/login']);
+  });
+
+  it('ends the session when the refresh cannot recover it', async () => {
+    resetApiClientForTests();
+    const calls: Call[] = [];
+    let expiredCount = 0;
+    configureApiClient({
+      baseUrl: 'http://api.test',
+      onSessionExpired: () => {
+        expiredCount += 1;
+      },
+      fetchImpl: recordingFetch(() => ({ status: 401, body: unauthorized }), calls),
+    });
+
+    setAccessToken('stale-token');
+    const err: unknown = await apiClient.get('/auth/me').catch((e) => e);
+
+    expect((err as ApiError).statusCode).toBe(401);
+    // One attempt, one retry, no loop: a dead cookie is settled after that.
+    expect(calls.map((call) => call.path)).toEqual(['/auth/me', '/auth/refresh']);
+    expect(expiredCount).toBe(1);
+    expect(getAccessToken()).toBeNull();
   });
 });

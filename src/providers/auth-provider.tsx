@@ -4,10 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 
 import * as authApi from '@/api/auth.api';
-import { setAccessToken, setRefreshTokenReader } from '@/api/client';
+import { configureApiClient, setAccessToken, setRefreshTokenReader } from '@/api/client';
 import { isApiError } from '@/api/errors';
 import { scopeViolation } from '@/lib/permissions';
 import { queryKeys } from '@/lib/query-keys';
+import { resolveSessionStatus, type SessionStatus } from '@/lib/session';
 import type { AuthenticatedUser } from '@/types/domain';
 
 interface AuthContextValue {
@@ -15,6 +16,12 @@ interface AuthContextValue {
   /** True while the initial session is being resolved. */
   isLoading: boolean;
   isAuthenticated: boolean;
+  /**
+   * `'unresolved'` when the session check got no answer from the server (no
+   * connection, a gateway error). The refresh cookie may still be perfectly
+   * good, so nothing may conclude the user is signed out.
+   */
+  sessionStatus: SessionStatus;
   login: (input: authApi.LoginInput) => Promise<AuthenticatedUser>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -56,6 +63,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setRefreshTokenReader(null);
   }, []);
 
+  /**
+   * The client has already tried the refresh cookie and failed, so the session
+   * is over. Dropping the cached identity here ends it immediately instead of
+   * leaving a signed-in-looking app that 401s on every later request; the empty
+   * cache also stops the previous account's data surviving on a shared device.
+   */
+  useEffect(() => {
+    configureApiClient({
+      onSessionExpired: () => {
+        queryClient.clear();
+        queryClient.setQueryData(queryKeys.auth.me, null);
+      },
+    });
+    return () => configureApiClient({ onSessionExpired: undefined });
+  }, [queryClient]);
+
   const loginMutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (session) => {
@@ -93,11 +116,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await logoutMutation.mutateAsync();
   }, [logoutMutation]);
 
+  /**
+   * Re-runs the session check. Also what a guard offers after an `'unresolved'`
+   * attempt, where the server simply did not answer.
+   */
   const refreshUser = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
   }, [queryClient]);
 
   const user = meQuery.data ?? null;
+
+  const sessionStatus = resolveSessionStatus(user, meQuery.error);
 
   const scopeError = useMemo(() => {
     if (!user) return null;
@@ -111,12 +140,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // app flashes a spinner on each background refetch.
       isLoading: meQuery.isLoading,
       isAuthenticated: Boolean(user),
+      sessionStatus,
       login,
       logout,
       refreshUser,
       scopeError,
     }),
-    [user, meQuery.isLoading, login, logout, refreshUser, scopeError],
+    [user, meQuery.isLoading, sessionStatus, login, logout, refreshUser, scopeError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

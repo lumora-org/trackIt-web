@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Building2, ChevronDown, LogOut, MoreHorizontal } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { apiClient } from '@/api/client';
@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import { fullName } from '@/lib/format';
 import { PROFILE_ITEM, visibleBottomBar, visibleGroups } from '@/lib/navigation';
 import { ROLE_LABELS } from '@/lib/permissions';
+import { syncAppBadge } from '@/lib/push';
 import { queryKeys } from '@/lib/query-keys';
 import type { Business } from '@/types/domain';
 
@@ -21,6 +22,7 @@ import { Sidebar } from './sidebar';
 import { TopBar } from './top-bar';
 import { useAuth } from '@/providers/auth-provider';
 import { useBranchContext } from '@/providers/branch-provider';
+import { usePush } from '@/providers/push-provider';
 
 /**
  * Responsive application shell (PROMPT.md §5).
@@ -33,6 +35,7 @@ import { useBranchContext } from '@/providers/branch-provider';
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout, scopeError } = useAuth();
+  const { unregisterAll } = usePush();
   const {
     activeBranch,
     branches,
@@ -79,8 +82,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   const bottomBar = visibleBottomBar(user?.role);
   const role = user?.role ?? null;
 
+  /*
+   * While the app is open it owns the icon badge: the count here is fresher
+   * than anything a push message could carry, and the service worker only needs
+   * to keep it current once the app is closed.
+   */
+  useEffect(() => {
+    void syncAppBadge(unreadQuery.data ?? 0);
+  }, [unreadQuery.data]);
+
   async function handleSignOut() {
     setSignOutOpen(false);
+    // A shared device must stop alerting the person who just left.
+    await unregisterAll();
     await logout();
     // `logout` clears the query cache, so no in-memory data survives.
     router.replace('/login');
