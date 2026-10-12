@@ -193,13 +193,15 @@ export function DataTable<T>({
                 ) : null}
 
                 {interactive ? (
-                  <button
-                    type="button"
+                  <Button
+                    block
+                    variant="outline"
+                    size="sm"
                     onClick={() => onRowClick?.(row)}
-                    className="sr-only focus:not-sr-only focus:mt-3 focus:w-full focus:rounded-lg focus:bg-neutral-100 focus:px-3 focus:py-2 focus:text-sm focus:font-medium"
+                    className="mt-3"
                   >
                     Open details
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </li>
