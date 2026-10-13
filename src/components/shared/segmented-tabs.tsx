@@ -28,34 +28,37 @@ export function SegmentedTabs<T extends string>({
 }) {
   return (
     <div
-      role="tablist"
-      aria-label={ariaLabel}
       className={cn(
-        '-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0',
-        'inline-flex min-w-full gap-1 rounded-xl bg-neutral-100 p-1 sm:min-w-0',
+        '-mx-4 block w-full min-w-0 max-w-full overflow-x-auto px-4 sm:mx-0 sm:px-0',
         className,
       )}
     >
-      {options.map((option) => {
-        const selected = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              'min-h-touch focus-visible:outline-brand-600 flex-1 rounded-lg px-3 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-2',
-              selected
-                ? 'bg-surface text-neutral-900 shadow-xs'
-                : 'text-neutral-600 hover:text-neutral-900',
-            )}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+      <div
+        role="tablist"
+        aria-label={ariaLabel}
+        className="flex w-max min-w-full gap-1 rounded-xl bg-neutral-100 p-1"
+      >
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                'min-h-touch focus-visible:outline-brand-600 flex-1 rounded-lg px-3 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-2',
+                selected
+                  ? 'bg-surface text-neutral-900 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900',
+              )}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

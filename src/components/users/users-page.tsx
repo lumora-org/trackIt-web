@@ -2,7 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, Users } from 'lucide-react';
+import { Eye, EyeOff, UserPlus, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
@@ -126,7 +126,6 @@ export function UsersPage() {
       key: 'actions',
       header: '',
       align: 'right',
-      mobileHidden: true,
       render: (u) => {
         // Product decision: managing users is ADMIN-only work.
         if (!canManage) return null;
@@ -136,7 +135,7 @@ export function UsersPage() {
         if (caller.role === 'ADMIN' && u.role !== 'MANAGER') return null;
 
         return (
-          <div className="flex justify-end gap-1">
+          <div className="flex flex-wrap justify-end gap-1">
             <Button variant="ghost" size="sm" onClick={() => setEditTarget(u)}>
               Edit
             </Button>
@@ -294,6 +293,8 @@ function CreateUserDialog({
 }) {
   const queryClient = useQueryClient();
   const [formError, setFormError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const {
     register,
@@ -420,24 +421,58 @@ function CreateUserDialog({
           />
         ) : null}
 
-        <Input
-          label="Temporary password"
-          type="password"
-          autoComplete="new-password"
-          description="Must be at least 8 characters."
-          error={errors.password?.message}
-          disabled={mutation.isPending}
-          {...register('password')}
-        />
+        <div className="relative">
+          <Input
+            label="Temporary password"
+            type={showPassword ? 'text' : 'password'}
+            autoComplete="new-password"
+            description="Must be at least 8 characters."
+            error={errors.password?.message}
+            disabled={mutation.isPending}
+            className="pr-14"
+            {...register('password')}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((visible) => !visible)}
+            aria-label={showPassword ? 'Hide temporary password' : 'Show temporary password'}
+            aria-pressed={showPassword}
+            disabled={mutation.isPending}
+            className="size-touch focus-visible:outline-brand-600 absolute top-[2.15rem] right-1 flex items-center justify-center rounded-lg text-neutral-500 hover:text-neutral-700 focus-visible:outline-2 disabled:opacity-50"
+          >
+            {showPassword ? (
+              <EyeOff className="size-5" aria-hidden="true" />
+            ) : (
+              <Eye className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
 
-        <Input
-          label="Confirm password"
-          type="password"
-          autoComplete="new-password"
-          error={errors.confirmPassword?.message}
-          disabled={mutation.isPending}
-          {...register('confirmPassword')}
-        />
+        <div className="relative">
+          <Input
+            label="Confirm password"
+            type={showConfirmPassword ? 'text' : 'password'}
+            autoComplete="new-password"
+            error={errors.confirmPassword?.message}
+            disabled={mutation.isPending}
+            className="pr-14"
+            {...register('confirmPassword')}
+          />
+          <button
+            type="button"
+            onClick={() => setShowConfirmPassword((visible) => !visible)}
+            aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+            aria-pressed={showConfirmPassword}
+            disabled={mutation.isPending}
+            className="size-touch focus-visible:outline-brand-600 absolute top-[2.15rem] right-1 flex items-center justify-center rounded-lg text-neutral-500 hover:text-neutral-700 focus-visible:outline-2 disabled:opacity-50"
+          >
+            {showConfirmPassword ? (
+              <EyeOff className="size-5" aria-hidden="true" />
+            ) : (
+              <Eye className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
     </Dialog>
   );
